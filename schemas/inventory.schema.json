@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agentic-engineering/inventory.schema.json",
+  "title": "Repository inventory",
+  "type": "object",
+  "required": ["schema_version", "owner", "generated_at", "source", "repositories"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "owner": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string", "minLength": 1},
+    "repositories": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/repository"}
+    }
+  },
+  "$defs": {
+    "repository": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "full_name",
+        "visibility",
+        "default_branch",
+        "clone_url",
+        "archived"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "integer", "minimum": 0},
+        "name": {"type": "string", "minLength": 1},
+        "full_name": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+        "visibility": {"enum": ["public", "private", "internal"]},
+        "default_branch": {"type": "string", "minLength": 1},
+        "clone_url": {"type": "string"},
+        "archived": {"type": "boolean"},
+        "commit_sha": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

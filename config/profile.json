@@ -1,0 +1,9 @@
+{
+  "owner": "SuriyaBoon",
+  "inventory_mode": "snapshot_then_live",
+  "include_private": true,
+  "download_public_snapshots": true,
+  "download_private_snapshots_when_authenticated": true,
+  "fail_closed_on_missing_private_auth": true,
+  "default_runtime": "system_temp"
+}

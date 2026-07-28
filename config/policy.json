@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "mode": "read_only_audit",
+  "source_repository_mutation": false,
+  "network": {
+    "allowed_hosts": [
+      "api.github.com",
+      "github.com",
+      "codeload.github.com"
+    ],
+    "private_repository_token_env": "GITHUB_TOKEN"
+  },
+  "runtime": {
+    "max_repository_files": 20000,
+    "max_text_file_bytes": 1048576,
+    "max_total_text_bytes": 20971520,
+    "max_download_bytes": 104857600
+  },
+  "agents": [
+    "architecture",
+    "workflow",
+    "security",
+    "testing",
+    "ci",
+    "documentation",
+    "integration",
+    "governance",
+    "reviewer"
+  ],
+  "prohibited_operations": [
+    "git_push",
+    "pull_request_create",
+    "issue_create",
+    "repository_update",
+    "deployment",
+    "external_message",
+    "live_ad_action",
+    "live_vm_action",
+    "live_backup_restore",
+    "risk_acceptance",
+    "finding_closure"
+  ],
+  "reporting": {
+    "require_file_evidence": true,
+    "require_reviewer_pass": true,
+    "hash_algorithm": "sha256"
+  }
+}

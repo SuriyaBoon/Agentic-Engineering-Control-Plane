@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agentic-engineering/audit-report.schema.json",
+  "title": "Repository audit report",
+  "type": "object",
+  "required": [
+    "repository",
+    "status",
+    "source_path",
+    "agents_run",
+    "findings",
+    "metrics",
+    "limitations",
+    "reviewer_passed"
+  ],
+  "properties": {
+    "repository": {"$ref": "inventory.schema.json#/$defs/repository"},
+    "status": {
+      "enum": ["audited", "source_missing", "auth_required", "unavailable", "error"]
+    },
+    "source_path": {"type": ["string", "null"]},
+    "agents_run": {"type": "array", "items": {"type": "string"}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "finding_id",
+          "agent",
+          "category",
+          "severity",
+          "title",
+          "evidence",
+          "recommendation",
+          "confidence"
+        ],
+        "properties": {
+          "finding_id": {"type": "string"},
+          "agent": {"type": "string"},
+          "category": {"type": "string"},
+          "severity": {"enum": ["critical", "high", "medium", "low", "info"]},
+          "title": {"type": "string"},
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "recommendation": {"type": "string"},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "metrics": {"type": "object"},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "reviewer_passed": {"type": "boolean"}
+  }
+}
