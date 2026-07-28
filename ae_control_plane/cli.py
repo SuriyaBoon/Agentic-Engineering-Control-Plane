@@ -13,6 +13,7 @@ from .inventory import inventory_payload, load_inventory, merge_inventory, write
 from .models import RepositoryDescriptor
 from .orchestrator import AuditOrchestrator
 from .policy import AuditPolicy
+from .workflow import GovernedWorkflow
 
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -34,6 +35,17 @@ def _client(policy: AuditPolicy) -> GitHubClient:
     )
 
 
+def _workflow(args: argparse.Namespace) -> GovernedWorkflow:
+    return GovernedWorkflow(
+        policy=_policy(args),
+        runtime_root=args.runtime,
+    )
+
+
+def _print(payload: dict | list) -> None:
+    print(json.dumps(payload, indent=2, sort_keys=True))
+
+
 def command_agents(args: argparse.Namespace) -> None:
     policy = _policy(args)
     enabled = set(policy.enabled_agents)
@@ -45,7 +57,22 @@ def command_agents(args: argparse.Namespace) -> None:
         ]
         + [{"name": "reviewer", "enabled": "reviewer" in enabled}],
     }
-    print(json.dumps(payload, indent=2))
+    payload["lifecycle_agents"] = [
+        "intent_guard",
+        "planner",
+        "tool_router",
+        "human_execution_approver",
+        "safe_executor",
+        "validator",
+        "human_closure_approver",
+        "memory",
+        "monitor",
+        "response_generator",
+    ]
+    payload["tools"] = [
+        item.to_dict() for item in _workflow(args).registry.list()
+    ]
+    _print(payload)
 
 
 def command_doctor(args: argparse.Namespace) -> None:
@@ -64,10 +91,15 @@ def command_doctor(args: argparse.Namespace) -> None:
         "private_repositories": private,
         "github_token_present": bool(os.environ.get(policy.token_env)),
         "runtime": str(Path(args.runtime).resolve()),
+        "workflow_database": str(
+            (Path(args.runtime) / "workflow" / "workflow.db").resolve()
+        ),
+        "governed_lifecycle_ready": True,
+        "live_remediation_enabled": False,
     }
     if private and not payload["github_token_present"]:
         payload["status"] = "ready_public_auth_required_private"
-    print(json.dumps(payload, indent=2))
+    _print(payload)
 
 
 def command_inventory(args: argparse.Namespace) -> None:
@@ -76,7 +108,7 @@ def command_inventory(args: argparse.Namespace) -> None:
     payload = inventory_payload(args.owner, repositories, source="github_api")
     if args.output:
         write_inventory(args.output, payload)
-    print(json.dumps(payload, indent=2))
+    _print(payload)
 
 
 def command_audit_repo(args: argparse.Namespace) -> None:
@@ -96,7 +128,7 @@ def command_audit_repo(args: argparse.Namespace) -> None:
         github_client=_client(policy),
     )
     report = orchestrator.audit_repository(descriptor, args.path)
-    print(json.dumps(report.to_dict(), indent=2))
+    _print(report.to_dict())
 
 
 def command_audit_all(args: argparse.Namespace) -> None:
@@ -123,23 +155,117 @@ def command_audit_all(args: argparse.Namespace) -> None:
         local_roots=args.source_root,
         download_missing=args.download_missing,
     )
-    print(
-        json.dumps(
-            {
-                "status": "completed",
-                "run_root": str(run_root),
-                "repository_count": portfolio["repository_count"],
-                "status_counts": portfolio["status_counts"],
-                "finding_counts": portfolio["finding_counts"],
-            },
-            indent=2,
-        )
+    result = {
+        "status": "completed",
+        "run_root": str(run_root),
+        "repository_count": portfolio["repository_count"],
+        "status_counts": portfolio["status_counts"],
+        "finding_counts": portfolio["finding_counts"],
+    }
+    if args.create_work_items:
+        result["workflow"] = GovernedWorkflow(
+            policy=policy,
+            runtime_root=args.runtime,
+        ).ingest_run(run_root)
+    _print(result)
+
+
+def command_workflow_ingest(args: argparse.Namespace) -> None:
+    _print(_workflow(args).ingest_run(args.run_root, actor=args.actor))
+
+
+def command_work_list(args: argparse.Namespace) -> None:
+    items = _workflow(args).store.list_work_items(args.state)
+    _print([item.to_dict() for item in items])
+
+
+def command_work_show(args: argparse.Namespace) -> None:
+    workflow = _workflow(args)
+    item = workflow.store.get_work_item(args.work_item_id)
+    payload = {
+        "work_item": item.to_dict(),
+        "events": workflow.store.events(args.work_item_id),
+        "approvals": [
+            approval.to_dict()
+            for approval in workflow.store.approvals(args.work_item_id)
+        ],
+    }
+    try:
+        payload["plan"] = workflow.store.get_plan(args.work_item_id).to_dict()
+    except KeyError:
+        payload["plan"] = None
+    try:
+        payload["latest_execution"] = workflow.store.latest_execution(
+            args.work_item_id
+        ).to_dict()
+    except KeyError:
+        payload["latest_execution"] = None
+    _print(payload)
+
+
+def command_work_triage(args: argparse.Namespace) -> None:
+    _print(
+        _workflow(args).triage(
+            args.work_item_id,
+            actor=args.actor,
+            owner=args.owner,
+        ).to_dict()
     )
+
+
+def command_work_plan(args: argparse.Namespace) -> None:
+    _print(
+        _workflow(args).plan(
+            args.work_item_id,
+            actor=args.actor,
+        ).to_dict()
+    )
+
+
+def command_work_approve(args: argparse.Namespace) -> None:
+    workflow = _workflow(args)
+    if args.stage == "execution":
+        item = workflow.approve_execution(
+            args.work_item_id,
+            actor=args.actor,
+            decision=args.decision,
+            comment=args.comment,
+        )
+    else:
+        item = workflow.approve_closure(
+            args.work_item_id,
+            actor=args.actor,
+            decision=args.decision,
+            comment=args.comment,
+        )
+    _print(item.to_dict())
+
+
+def command_work_execute(args: argparse.Namespace) -> None:
+    _print(
+        _workflow(args).execute(
+            args.work_item_id,
+            actor=args.actor,
+        ).to_dict()
+    )
+
+
+def command_work_validate(args: argparse.Namespace) -> None:
+    _print(
+        _workflow(args).validate(
+            args.work_item_id,
+            actor=args.actor,
+        ).to_dict()
+    )
+
+
+def command_monitor(args: argparse.Namespace) -> None:
+    _print(_workflow(args).status())
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        description="Read-only Agentic Engineering repository audit control plane"
+        description="Governed Agentic Engineering audit and remediation control plane"
     )
     root.add_argument("--policy", default=str(DEFAULT_POLICY))
     root.add_argument("--runtime", default=str(DEFAULT_RUNTIME))
@@ -173,7 +299,61 @@ def parser() -> argparse.ArgumentParser:
     audit_all.add_argument("--source-root", action="append", default=[])
     audit_all.add_argument("--download-missing", action="store_true")
     audit_all.add_argument("--live-inventory", action="store_true")
+    audit_all.add_argument("--create-work-items", action="store_true")
     audit_all.set_defaults(func=command_audit_all)
+
+    workflow_ingest = commands.add_parser("workflow-ingest")
+    workflow_ingest.add_argument("--run-root", required=True)
+    workflow_ingest.add_argument("--actor", default="audit-ingest")
+    workflow_ingest.set_defaults(func=command_workflow_ingest)
+
+    work_list = commands.add_parser("work-list")
+    work_list.add_argument("--state")
+    work_list.set_defaults(func=command_work_list)
+
+    work_show = commands.add_parser("work-show")
+    work_show.add_argument("--work-item-id", required=True)
+    work_show.set_defaults(func=command_work_show)
+
+    work_triage = commands.add_parser("work-triage")
+    work_triage.add_argument("--work-item-id", required=True)
+    work_triage.add_argument("--actor", required=True)
+    work_triage.add_argument("--owner", required=True)
+    work_triage.set_defaults(func=command_work_triage)
+
+    work_plan = commands.add_parser("work-plan")
+    work_plan.add_argument("--work-item-id", required=True)
+    work_plan.add_argument("--actor", required=True)
+    work_plan.set_defaults(func=command_work_plan)
+
+    work_approve = commands.add_parser("work-approve")
+    work_approve.add_argument("--work-item-id", required=True)
+    work_approve.add_argument(
+        "--stage",
+        required=True,
+        choices=("execution", "closure"),
+    )
+    work_approve.add_argument(
+        "--decision",
+        required=True,
+        choices=("approved", "rejected"),
+    )
+    work_approve.add_argument("--actor", required=True)
+    work_approve.add_argument("--comment", required=True)
+    work_approve.set_defaults(func=command_work_approve)
+
+    work_execute = commands.add_parser("work-execute")
+    work_execute.add_argument("--work-item-id", required=True)
+    work_execute.add_argument("--actor", required=True)
+    work_execute.set_defaults(func=command_work_execute)
+
+    work_validate = commands.add_parser("work-validate")
+    work_validate.add_argument("--work-item-id", required=True)
+    work_validate.add_argument("--actor", required=True)
+    work_validate.set_defaults(func=command_work_validate)
+
+    monitor = commands.add_parser("monitor")
+    monitor.set_defaults(func=command_monitor)
 
     return root
 

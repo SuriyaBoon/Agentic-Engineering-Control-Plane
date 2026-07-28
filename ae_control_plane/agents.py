@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import re
 from abc import ABC, abstractmethod
@@ -147,9 +148,65 @@ class SecurityAgent(AuditAgent):
     name = "security"
 
     SECRET_PATTERNS = (
-        re.compile(r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*[\"'][^\"']{8,}[\"']"),
-        re.compile(r"(?i)password\s*[:=]\s*[\"'][^\"']{4,}[\"']"),
+        re.compile(
+            r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*[\"']([^\"']{8,})[\"']"
+        ),
+        re.compile(r"(?i)(password)\s*[:=]\s*[\"']([^\"']{4,})[\"']"),
     )
+
+    PLACEHOLDER_MARKERS = (
+        "<",
+        "example",
+        "placeholder",
+        "sample",
+        "changeme",
+        "replace-me",
+        "redacted",
+    )
+
+    @classmethod
+    def _python_risks(cls, content: str) -> tuple[bool, bool]:
+        try:
+            tree = ast.parse(content)
+        except SyntaxError:
+            return False, False
+        secret = False
+        unsafe = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                value = node.value
+                names = [
+                    target.id.lower()
+                    for target in targets
+                    if isinstance(target, ast.Name)
+                ]
+                if (
+                    any(
+                        marker in name
+                        for name in names
+                        for marker in ("password", "secret", "token", "api_key")
+                    )
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)
+                    and len(value.value) >= 4
+                    and not any(
+                        marker in value.value.lower()
+                        for marker in cls.PLACEHOLDER_MARKERS
+                    )
+                ):
+                    secret = True
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == "eval":
+                    unsafe = True
+                if any(
+                    keyword.arg == "shell"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in node.keywords
+                ):
+                    unsafe = True
+        return secret, unsafe
 
     def run(self, context: RepositoryContext) -> list[Finding]:
         findings: list[Finding] = []
@@ -160,12 +217,30 @@ class SecurityAgent(AuditAgent):
         guarded_live_actions = []
 
         for path, content in context.text_files.items():
-            if "<<<<<<<" in content or ">>>>>>>" in content:
+            if re.search(r"(?m)^(<<<<<<<|=======|>>>>>>>)", content):
                 conflicts.append(path)
-            if any(pattern.search(content) for pattern in self.SECRET_PATTERNS):
-                possible_secrets.append(path)
-            if "shell=True" in content or re.search(r"\beval\s*\(", content):
-                unsafe_execution.append(path)
+            if Path(path).suffix.lower() == ".py":
+                python_secret, python_unsafe = self._python_risks(content)
+                if python_secret:
+                    possible_secrets.append(path)
+                if python_unsafe:
+                    unsafe_execution.append(path)
+            else:
+                matches = [
+                    match
+                    for pattern in self.SECRET_PATTERNS
+                    for match in pattern.finditer(content)
+                ]
+                if any(
+                    not any(
+                        marker in match.group(2).lower()
+                        for marker in self.PLACEHOLDER_MARKERS
+                    )
+                    for match in matches
+                ):
+                    possible_secrets.append(path)
+                if "shell=True" in content or re.search(r"\beval\s*\(", content):
+                    unsafe_execution.append(path)
             if any(
                 marker.lower() in content.lower()
                 for marker in (
@@ -372,7 +447,7 @@ class DocumentationAgent(AuditAgent):
                     )
                 )
         if not re.search(
-            r"(?i)\b(limitations?|not production|safety model|production boundary)\b",
+            r"(?i)\b(limitations?|not production|safety model|safety boundary|production boundary)\b",
             readme,
         ):
             findings.append(

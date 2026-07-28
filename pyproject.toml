@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-engineering-control-plane"
-version = "0.1.0"
-description = "Read-only multi-agent audit control plane for GitHub repositories"
+version = "0.2.0"
+description = "Governed audit, approval, dry-run execution, evidence, and monitoring control plane"
 requires-python = ">=3.11"
 dependencies = []
 

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
   "owner": "SuriyaBoon",
-  "generated_at": "2026-07-28T00:00:00+07:00",
+  "generated_at": "2026-07-28T17:15:00+07:00",
   "source": "connected_github_app",
   "repositories": [
     {"id": 1215810606, "name": "Architech", "full_name": "SuriyaBoon/Architech", "visibility": "private", "default_branch": "master", "clone_url": "https://github.com/SuriyaBoon/Architech.git", "archived": false},
@@ -26,6 +26,7 @@
     {"id": 1299181006, "name": "SentinelGRC", "full_name": "SuriyaBoon/SentinelGRC", "visibility": "public", "default_branch": "main", "clone_url": "https://github.com/SuriyaBoon/SentinelGRC.git", "archived": false},
     {"id": 1307606178, "name": "Second-Brain-Base", "full_name": "SuriyaBoon/Second-Brain-Base", "visibility": "private", "default_branch": "main", "clone_url": "https://github.com/SuriyaBoon/Second-Brain-Base.git", "archived": false},
     {"id": 1307742178, "name": "JML-Automation", "full_name": "SuriyaBoon/JML-Automation", "visibility": "public", "default_branch": "agent/jml-mvp", "clone_url": "https://github.com/SuriyaBoon/JML-Automation.git", "archived": false},
-    {"id": 1308683476, "name": "Mini-SOAR", "full_name": "SuriyaBoon/Mini-SOAR", "visibility": "public", "default_branch": "main", "clone_url": "https://github.com/SuriyaBoon/Mini-SOAR.git", "archived": false}
+    {"id": 1308683476, "name": "Mini-SOAR", "full_name": "SuriyaBoon/Mini-SOAR", "visibility": "public", "default_branch": "main", "clone_url": "https://github.com/SuriyaBoon/Mini-SOAR.git", "archived": false},
+    {"id": 1314807661, "name": "Agentic-Engineering-Control-Plane", "full_name": "SuriyaBoon/Agentic-Engineering-Control-Plane", "visibility": "public", "default_branch": "main", "clone_url": "https://github.com/SuriyaBoon/Agentic-Engineering-Control-Plane.git", "archived": false}
   ]
 }

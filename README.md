@@ -1,179 +1,269 @@
 # Agentic Engineering Control Plane
 
-A standalone, read-only control plane for auditing every repository owned by
-[`SuriyaBoon`](https://github.com/SuriyaBoon). It turns repository source into
-repeatable architecture, workflow, security, testing, CI, documentation,
-integration, and governance findings, then sends those findings through an
-independent reviewer before producing hashed evidence.
+A standalone, governed control plane for auditing every repository owned by
+[`SuriyaBoon`](https://github.com/SuriyaBoon) and carrying accepted findings
+through a controlled work lifecycle.
 
-This repository does **not** modify, push to, deploy, or operate any audited
-repository. It is a portfolio/lab assurance system, not an autonomous
-production remediation platform.
+The system covers repository inventory, intent/policy validation, planning,
+agent routing, bounded tool selection, dry-run execution, independent
+validation, approval-gated closure, persistent event memory, response
+generation, and monitoring.
 
-## Current scope
+Source repositories remain read-only. This portfolio/lab system demonstrates
+the complete governed workflow without claiming autonomous production
+remediation.
 
-- Inventory snapshot: 23 repositories (19 public, 4 private).
+## Verified scope
+
+- Inventory snapshot: 24 repositories (20 public, 4 private).
 - Public repositories can be audited without credentials.
-- Private repositories require a read-only `GITHUB_TOKEN`; without it, they are
-  recorded as `auth_required` rather than silently omitted.
-- Analysis is deterministic and works without an LLM/API key.
-- Every repository receives a result, including unavailable or failed sources.
-- Every accepted finding must reference a scanned file or explicit metadata.
-- Every run contains per-repository JSON/Markdown, portfolio summaries, the
-  inventory used, and a SHA-256 evidence manifest.
+- Private repositories require a read-only `GITHUB_TOKEN`; otherwise they are
+  recorded as `auth_required`, never silently omitted.
+- Eight audit agents plus an evidence reviewer.
+- Governed work-item state machine with SLA, bounded retry, and manual fallback.
+- Independent execution approval, executor, validator, and closure approver.
+- SQLite operational memory with an append-only SHA-256 event chain.
+- Dry-run remediation artifacts only; no source mutation or production action.
+- Deterministic operation without an LLM or third-party Python package.
 
-## High-level flow
+## End-to-end flow
 
 ```mermaid
 flowchart LR
-    U["Audit request"] --> I["Inventory and intent validation"]
-    I --> P["Read-only plan"]
-    P --> R["Repository routing"]
-    R --> S["Local source or immutable GitHub snapshot"]
-    S --> A["Specialist audit agents"]
-    A --> V["Independent evidence reviewer"]
-    V --> E["Per-repository evidence"]
-    E --> O["Portfolio report and SHA-256 manifest"]
-    O --> M["Metrics and next-run monitoring"]
+    U["User input"] --> I["Intent and policy guard"]
+    I --> A["Repository inventory and immutable source"]
+    A --> D["Specialist audit agents"]
+    D --> R["Evidence reviewer"]
+    R --> W["Finding to governed work item"]
+    W --> T["Triage, owner, severity, SLA"]
+    T --> P["Remediation planner"]
+    P --> G{"Human execution approval"}
+    G -- "Rejected" --> M["Manual review"]
+    G -- "Approved" --> X["Safe dry-run executor"]
+    X --> V["Independent validation"]
+    V -- "Failed" --> Y{"Retry budget available"}
+    Y -- "Yes" --> X
+    Y -- "No" --> M
+    V -- "Passed" --> C{"Independent closure approval"}
+    C -- "Rejected" --> M
+    C -- "Approved" --> Z["Close simulated work item"]
+    Z --> E["Hash-chained memory"]
+    E --> O["Response and monitoring"]
 ```
 
-## Detailed flow
+## Ten-stage Agentic Engineering mapping
+
+| Stage | Implementation | Output |
+|---|---|---|
+| User Input | CLI commands and explicit actor identities | Validated command |
+| Intent Understanding | Policy guard and allowed mode checks | Allowed/denied intent |
+| Task Planning | `RemediationPlanner` | Versioned remediation plan |
+| Agent Routing | Audit agent selection plus lifecycle role routing | Assigned agent/role |
+| Tool Selection | `ToolRegistry` with enabled and disabled boundaries | Safe tool decision |
+| Execution | `SafeExecutor` in `dry_run`/`mock` only | Hashed execution artifact |
+| Validation | Evidence reviewer and independent execution validator | Pass/fail with reasons |
+| Memory Update | SQLite state plus SHA-256 chained events | Tamper-evident history |
+| Response Generation | JSON/Markdown reports and CLI responses | Human-readable evidence |
+| Monitoring | State, severity, overdue, retry, and integrity metrics | Operational status |
+
+## State machine
 
 ```mermaid
-flowchart TD
-    A["Input: owner, inventory, source roots, policy"] --> B{"Policy permits read-only audit?"}
-    B -- "No" --> X["Fail closed"]
-    B -- "Yes" --> C["Resolve every inventory entry"]
-    C --> D{"Local source found?"}
-    D -- "Yes" --> F["Capture Git commit or deterministic tree hash"]
-    D -- "No" --> E{"Download enabled?"}
-    E -- "No" --> N["Record source_missing or auth_required"]
-    E -- "Yes" --> G{"Public or authenticated?"}
-    G -- "No" --> N
-    G -- "Yes" --> H["Fetch branch SHA and bounded ZIP snapshot"]
-    H --> F
-    F --> I["Build bounded repository context"]
-    I --> J["Run specialist agents"]
-    J --> K["Reviewer deduplicates and rejects invalid evidence"]
-    K --> L["Write repository JSON and Markdown"]
-    N --> L
-    L --> Q{"More repositories?"}
-    Q -- "Yes" --> C
-    Q -- "No" --> R["Aggregate status and finding metrics"]
-    R --> S["Hash every evidence artifact"]
-    S --> T["Return run location and coverage"]
+stateDiagram-v2
+    [*] --> new
+    new --> triaged
+    triaged --> planned
+    planned --> awaiting_execution_approval
+    awaiting_execution_approval --> approved: independent approval
+    awaiting_execution_approval --> manual_review: rejected
+    approved --> executing
+    executing --> validating: artifact generated
+    executing --> approved: bounded retry
+    executing --> manual_review: retry exhausted
+    validating --> awaiting_closure_approval: passed
+    validating --> approved: validation retry
+    validating --> manual_review: retry exhausted
+    awaiting_closure_approval --> closed: independent approval
+    awaiting_closure_approval --> manual_review: rejected
+    manual_review --> triaged
+    manual_review --> planned
+    manual_review --> approved
+    manual_review --> failed
+    failed --> triaged
+    closed --> [*]
 ```
 
-## Agent roles
+`closed` means the governed **simulation work item** completed with verified
+evidence. It does not assert that the source repository was changed or that the
+underlying production risk was remediated.
 
-| Agent | Responsibility | Key output |
+## Roles
+
+| Role/agent | Responsibility | Separation rule |
 |---|---|---|
-| Architecture | Purpose, entrypoints, layers, and data-flow documentation | Architecture gaps |
-| Workflow | Lifecycle, retry, fallback, rollback, and manual review | Workflow-control gaps |
-| Security | Secrets, unsafe execution, merge conflicts, and live-action boundaries | Security findings |
-| Testing | Automated tests and negative-control coverage | Test assurance gaps |
-| CI | Workflow presence and least-privilege permissions | CI findings |
-| Documentation | Reproducibility, claim integrity, and production boundaries | Documentation findings |
-| Integration | Versioned connectors, schemas, and contract tests | Integration gaps |
-| Governance | Owner, approval, evidence, verification, and closure | Governance findings |
-| Reviewer | Evidence validation, deduplication, and limitations | Accepted findings |
-| Orchestrator | Inventory coverage, routing, isolation, reports, and metrics | Complete audit run |
+| Intent guard | Reject policy-violating requests | Fails closed |
+| Audit agents | Detect architecture, workflow, security, test, CI, documentation, integration, and governance gaps | Read-only |
+| Evidence reviewer | Reject findings without scanned-file or metadata evidence | Independent from detectors |
+| Triage lead | Confirm owner and SLA | Cannot close work |
+| Planner | Produce steps, tool, validation, retry, and fallback | Cannot approve own plan |
+| Execution approver | Approve/reject execution | Cannot execute |
+| Safe executor | Generate a dry-run artifact | Cannot validate own output |
+| Validator | Verify artifact/hash/guardrails | Cannot close work |
+| Closure approver | Approve/reject closure | Must not be a prior lifecycle actor |
+| Memory/monitor | Record hash-chained history and operational metrics | No mutation authority |
 
 ## Quick start
 
-Requires Python 3.11 or newer and has no third-party runtime dependencies.
+Requires Python 3.11 or newer.
 
 ```powershell
 python -m ae_control_plane.cli doctor
 python -m ae_control_plane.cli agents
+python -B -m unittest discover -v -s tests
 ```
 
-Audit local repositories without network access:
-
-```powershell
-python -m ae_control_plane.cli audit-all `
-  --source-root C:\path\to\repositories
-```
-
-Audit all public repositories, using local copies first and immutable GitHub
-snapshots for anything missing:
+Audit every available repository and create governed work items:
 
 ```powershell
 python -m ae_control_plane.cli audit-all `
   --source-root C:\path\to\repositories `
   --download-missing `
-  --live-inventory
+  --live-inventory `
+  --create-work-items
 ```
 
-To include private repositories, create a fine-grained token with read-only
-Contents and Metadata access for the selected repositories, expose it only to
-the current process, and rerun the same command:
+An existing audit run can be ingested idempotently:
+
+```powershell
+python -m ae_control_plane.cli workflow-ingest `
+  --run-root C:\path\to\runs\<run-id>
+```
+
+## Governed lifecycle commands
+
+Use distinct human/agent actor names. The system enforces separation of duties.
+
+```powershell
+python -m ae_control_plane.cli work-list --state new
+
+python -m ae_control_plane.cli work-triage `
+  --work-item-id WORK-... `
+  --actor triage-lead `
+  --owner repository-owner
+
+python -m ae_control_plane.cli work-plan `
+  --work-item-id WORK-... `
+  --actor remediation-planner
+
+python -m ae_control_plane.cli work-approve `
+  --work-item-id WORK-... `
+  --stage execution `
+  --decision approved `
+  --actor change-approver `
+  --comment "Reviewed for dry-run execution"
+
+python -m ae_control_plane.cli work-execute `
+  --work-item-id WORK-... `
+  --actor safe-executor
+
+python -m ae_control_plane.cli work-validate `
+  --work-item-id WORK-... `
+  --actor independent-validator
+
+python -m ae_control_plane.cli work-approve `
+  --work-item-id WORK-... `
+  --stage closure `
+  --decision approved `
+  --actor risk-owner `
+  --comment "Simulation evidence independently verified"
+
+python -m ae_control_plane.cli work-show --work-item-id WORK-...
+python -m ae_control_plane.cli monitor
+```
+
+## Private repositories
+
+Create a fine-grained token with read-only Contents and Metadata access only:
 
 ```powershell
 $env:GITHUB_TOKEN = "<read-only fine-grained token>"
-python -m ae_control_plane.cli audit-all --download-missing --live-inventory
+python -m ae_control_plane.cli audit-all `
+  --download-missing `
+  --live-inventory `
+  --create-work-items
 Remove-Item Env:GITHUB_TOKEN
 ```
 
-Never commit the token. The system does not write it to reports.
+The token is never written to reports or workflow memory.
 
-## Outputs
+## Runtime outputs
 
-By default, runtime data is outside this Git repository:
-`%TEMP%\agentic-engineering-control-plane`.
+Runtime data defaults to `%TEMP%\agentic-engineering-control-plane`:
 
 ```text
 runs/<UTC-run-id>/
-├── inventory.json
-├── manifest.json
-├── portfolio.json
-├── portfolio.md
-└── repositories/
-    ├── SuriyaBoon__Example.json
-    └── SuriyaBoon__Example.md
+|-- inventory.json
+|-- manifest.json
+|-- portfolio.json
+|-- portfolio.md
+`-- repositories/
+    |-- SuriyaBoon__Example.json
+    `-- SuriyaBoon__Example.md
+
+workflow/
+|-- workflow.db
+`-- executions/
+    `-- WORK-.../
+        `-- attempt-1.json
 ```
 
-`status` distinguishes `audited`, `source_missing`, `auth_required`,
-`unavailable`, and `error`. A clean finding list only means that the current
-rules found no issue in the scanned context; it is not a certification.
+## Retry and fallback
 
-## Guardrails and human approval
+- Maximum attempts are configured in `config/policy.json`.
+- Execution or validation failure returns to `approved` while budget remains.
+- Exhausted attempts move to `manual_review`.
+- Rejected execution or closure also moves to `manual_review`.
+- Invalid state transitions, self-approval, missing evidence, disabled tools,
+  artifact tampering, and source-mutation plans fail closed.
 
-The policy in [`config/policy.json`](config/policy.json) fails closed unless
-`mode` is `read_only_audit` and source mutation is disabled.
+## Monitoring
 
-Human approval is required before any future capability that would:
+`monitor` returns:
 
-- change source, create commits, push, open a PR/issue, or alter repository settings;
-- execute AD, VM, backup/restore, containment, or deployment actions;
-- accept risk, close findings, send external messages, or expose private evidence.
+- work items by state and severity;
+- overdue count and identifiers;
+- event count and event-chain integrity;
+- explicit `production_execution=false`;
+- explicit `source_repository_mutation=false`.
 
-Those operations are deliberately not implemented in this release.
+The CLI is suitable for a scheduler or CI job, but the repository does not
+install a background service or silently schedule work on the user's machine.
 
-Repository content is treated as untrusted data, never as executable
-instructions. Snapshot paths and compressed/uncompressed sizes are validated;
-scans are bounded by file and byte limits.
+## Safety boundary
 
-## Metrics
+The following tools exist only as disabled boundaries:
 
-Each run records inventory coverage, status counts, findings by severity,
-reviewer state, file/source/test/workflow/manifest counts, scan truncation, and
-source identity. These metrics support trend comparison without claiming that a
-rule-based scan replaces penetration testing, code review, or compliance audit.
+- `github_draft_pr`
+- `live_infrastructure_action`
+
+The active `mock_remediation` tool writes a proposal artifact outside source
+repositories. It cannot commit, push, create PRs/issues, deploy, modify AD/VMs,
+perform restore operations, accept organizational risk, or claim production
+remediation.
+
+Repository content is treated as untrusted data rather than instructions.
+Snapshot paths and compressed/uncompressed sizes are validated, and scans are
+bounded by file and byte limits.
 
 ## Validation
 
 ```powershell
 python -B -m unittest discover -v -s tests
 python -m ae_control_plane.cli doctor
+python -m ae_control_plane.cli monitor
 ```
 
-CI repeats the unit suite and validates every committed JSON document.
+CI runs all tests and parses every committed JSON document.
 
-## Extension boundary
-
-Additional agents may be added behind the same `AuditAgent` interface. An LLM
-provider can later propose findings, but proposals must still pass the
-deterministic evidence reviewer and the same policy boundary. Remediation should
-remain a separate, approval-gated workflow rather than being added to this
-read-only audit path.
+See [`docs/AGENTIC-WORKFLOW.md`](docs/AGENTIC-WORKFLOW.md) for decision rules,
+inputs/outputs, approval points, error handling, metrics, and pseudocode.

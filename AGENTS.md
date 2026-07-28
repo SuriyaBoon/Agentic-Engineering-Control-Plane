@@ -6,7 +6,9 @@ These instructions apply to this repository.
 
 Audit the architecture, workflow, security boundaries, tests, CI, documentation,
 integration contracts, and governance evidence of repositories owned by
-`SuriyaBoon`.
+`SuriyaBoon`, then manage accepted findings through a governed simulation
+lifecycle with ownership, planning, approval, validation, evidence, closure,
+memory, and monitoring.
 
 ## Default boundary
 
@@ -27,6 +29,12 @@ integration contracts, and governance evidence of repositories owned by
 - Never claim a live integration based only on diagrams, fixtures, or README
   text.
 - Preserve concept-only, mock, dry-run, and synthetic boundaries.
+- Use explicit actor identities for every lifecycle action.
+- Enforce separation between planner, execution approver, executor, validator,
+  and closure approver.
+- Record every work-item transition in the hash-chained event memory.
+- Treat `closed` as closure of the simulated work item only; never claim that
+  source or production risk was remediated.
 
 ## Prohibited behavior
 
@@ -49,3 +57,13 @@ An audit run is complete only when it has:
 - reviewer validation;
 - a portfolio summary;
 - a SHA-256 evidence manifest.
+
+A governed lifecycle exercise is complete only when it also has:
+
+- an idempotent work item linked to repository, finding, run, and source identity;
+- an owner, severity-based SLA, bounded plan, retry budget, and fallback;
+- independent execution approval;
+- a dry-run artifact with SHA-256 identity;
+- independent validation;
+- independent closure approval;
+- a valid event hash chain and monitoring result.

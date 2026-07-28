@@ -53,10 +53,10 @@ class PolicyTests(unittest.TestCase):
 class InventoryTests(unittest.TestCase):
     def test_seed_inventory_has_full_current_snapshot(self) -> None:
         _, repositories = load_inventory(INVENTORY)
-        self.assertEqual(len(repositories), 23)
-        self.assertEqual(sum(item.visibility == "public" for item in repositories), 19)
+        self.assertEqual(len(repositories), 24)
+        self.assertEqual(sum(item.visibility == "public" for item in repositories), 20)
         self.assertEqual(sum(item.visibility == "private" for item in repositories), 4)
-        self.assertEqual(len({item.full_name.lower() for item in repositories}), 23)
+        self.assertEqual(len({item.full_name.lower() for item in repositories}), 24)
 
     def test_anonymous_live_inventory_does_not_drop_private_baseline(self) -> None:
         private = descriptor("private", "private")

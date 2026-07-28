@@ -46,3 +46,14 @@ class AuditPolicy:
     @property
     def token_env(self) -> str:
         return str(self.config["network"]["private_repository_token_env"])
+
+    @property
+    def workflow_max_retries(self) -> int:
+        return int(self.config["workflow"]["max_retries"])
+
+    @property
+    def sla_hours(self) -> dict[str, int]:
+        return {
+            str(key): int(value)
+            for key, value in self.config["workflow"]["sla_hours"].items()
+        }

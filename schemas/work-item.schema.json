@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agentic-engineering/work-item.schema.json",
+  "title": "Governed work item",
+  "type": "object",
+  "required": [
+    "work_item_id",
+    "finding_id",
+    "repository",
+    "source_run_id",
+    "title",
+    "category",
+    "severity",
+    "recommendation",
+    "evidence",
+    "state",
+    "created_by",
+    "retry_count",
+    "max_retries",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "work_item_id": {"type": "string", "pattern": "^WORK-"},
+    "finding_id": {"type": "string"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "source_commit": {"type": ["string", "null"]},
+    "source_run_id": {"type": "string"},
+    "title": {"type": "string"},
+    "category": {"type": "string"},
+    "severity": {"enum": ["critical", "high", "medium", "low", "info"]},
+    "recommendation": {"type": "string"},
+    "evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "state": {
+      "enum": [
+        "new",
+        "triaged",
+        "planned",
+        "awaiting_execution_approval",
+        "approved",
+        "executing",
+        "validating",
+        "awaiting_closure_approval",
+        "closed",
+        "manual_review",
+        "failed"
+      ]
+    },
+    "owner": {"type": ["string", "null"]},
+    "created_by": {"type": "string"},
+    "plan_id": {"type": ["string", "null"]},
+    "due_at": {"type": ["string", "null"], "format": "date-time"},
+    "retry_count": {"type": "integer", "minimum": 0},
+    "max_retries": {"type": "integer", "minimum": 1},
+    "last_error": {"type": ["string", "null"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}
