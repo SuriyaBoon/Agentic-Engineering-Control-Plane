@@ -1,0 +1,10 @@
+{
+  "summary": "Add an isolated Agentic Engineering smoke-test artifact",
+  "operations": [
+    {
+      "op": "write",
+      "path": "docs/agentic-engineering-smoke-test.md",
+      "content": "# Agentic Engineering smoke test\n\nThis file was created only inside an isolated task workspace to validate the governed development protocol.\n"
+    }
+  ]
+}

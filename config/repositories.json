@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0.0",
+  "repositories": [
+    {
+      "name": "SentinelGRC",
+      "full_name": "SuriyaBoon/SentinelGRC",
+      "clone_url": "https://github.com/SuriyaBoon/SentinelGRC.git",
+      "default_branch": "main",
+      "local_path": "../../SentinelGRC",
+      "test_commands": [
+        ["python", "-m", "unittest", "discover", "-v", "-p", "test_*.py"]
+      ]
+    },
+    {
+      "name": "LogWatcher",
+      "full_name": "SuriyaBoon/LogWatcher",
+      "clone_url": "https://github.com/SuriyaBoon/LogWatcher.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["python", "-m", "pytest", "tests/", "-v"]
+      ]
+    },
+    {
+      "name": "home-lab-v4",
+      "full_name": "SuriyaBoon/home-lab-v4",
+      "clone_url": "https://github.com/SuriyaBoon/home-lab-v4.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", "$e=$null;$t=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'Security-Audit.ps1'),[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|Out-String|Write-Error;exit 1}"]
+      ]
+    },
+    {
+      "name": "home-lab-v5",
+      "full_name": "SuriyaBoon/home-lab-v5",
+      "clone_url": "https://github.com/SuriyaBoon/home-lab-v5.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", "$e=$null;$t=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'Get-SystemInventory-Pro.ps1'),[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|Out-String|Write-Error;exit 1}"]
+      ]
+    },
+    {
+      "name": "Helpdesk-Simulator",
+      "full_name": "SuriyaBoon/Helpdesk-Simulator",
+      "clone_url": "https://github.com/SuriyaBoon/Helpdesk-Simulator.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["python", "-m", "pytest", "tests/", "-v"]
+      ]
+    },
+    {
+      "name": "JML-Automation",
+      "full_name": "SuriyaBoon/JML-Automation",
+      "clone_url": "https://github.com/SuriyaBoon/JML-Automation.git",
+      "default_branch": "agent/jml-mvp",
+      "test_commands": [
+        ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+      ]
+    },
+    {
+      "name": "home-lab-v2",
+      "full_name": "SuriyaBoon/home-lab-v2",
+      "clone_url": "https://github.com/SuriyaBoon/home-lab-v2.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", "$e=$null;$t=$null;[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'Create-BulkUsers.ps1'),[ref]$t,[ref]$e)|Out-Null;if($e.Count){$e|Out-String|Write-Error;exit 1}"]
+      ]
+    },
+    {
+      "name": "SOC-Homelab",
+      "full_name": "SuriyaBoon/SOC-Homelab-Elastic-Stack-security-monitoring",
+      "clone_url": "https://github.com/SuriyaBoon/SOC-Homelab-Elastic-Stack-security-monitoring.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["python", "scripts/validate_configs.py"]
+      ]
+    },
+    {
+      "name": "Backup-dr-lab",
+      "full_name": "SuriyaBoon/Backup-dr-lab",
+      "clone_url": "https://github.com/SuriyaBoon/Backup-dr-lab.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["python", "-m", "pytest", "tests/", "-v"]
+      ]
+    },
+    {
+      "name": "Mini-SOAR",
+      "full_name": "SuriyaBoon/Mini-SOAR",
+      "clone_url": "https://github.com/SuriyaBoon/Mini-SOAR.git",
+      "default_branch": "main",
+      "test_commands": [
+        ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+      ]
+    }
+  ]
+}

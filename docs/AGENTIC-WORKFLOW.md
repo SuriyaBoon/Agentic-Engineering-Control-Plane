@@ -86,10 +86,13 @@ monitor.verify_event_chain()
 monitor.report_state_severity_sla_and_failures()
 ```
 
-## Production extension boundary
+## Development protocol boundary
 
-A production extension would require a separately reviewed connector, isolated
-branch workspace, repository allowlist, change budget, test contract, rollback,
-draft-PR-only behavior, authenticated actor mapping, webhook verification, and
-post-merge source re-audit. None of those permissions are inferred from the
-safe workflow.
+The read-only finding lifecycle above remains available for portfolio audits.
+Version 0.4 provides a separate, operational cross-repository development protocol
+with registered repositories, isolated task clones, generated branches, change
+budgets, test contracts, independent review, draft-PR-only publication, and
+post-merge verification. See `docs/DEVELOPMENT-PROTOCOL.md`.
+
+This does not enable production infrastructure actions or copy the SentinelGRC
+governance lifecycle into target repositories.
