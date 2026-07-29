@@ -1,0 +1,45 @@
+{
+  "version": "1.0.0",
+  "mode": "governed_development",
+  "allowed_owners": [
+    "SuriyaBoon"
+  ],
+  "workspace_root": "runtime/development/tasks",
+  "limits": {
+    "max_changed_files": 50,
+    "max_added_lines": 2000,
+    "max_deleted_lines": 1000,
+    "max_file_bytes": 1048576,
+    "max_repair_attempts": 2,
+    "test_timeout_seconds": 600
+  },
+  "allowed_test_executables": [
+    "python",
+    "python.exe",
+    "py",
+    "py.exe",
+    "pytest",
+    "pytest.exe",
+    "npm",
+    "npm.cmd",
+    "node",
+    "node.exe",
+    "powershell",
+    "powershell.exe",
+    "pwsh",
+    "pwsh.exe",
+    "dotnet",
+    "dotnet.exe",
+    "go",
+    "go.exe",
+    "cargo",
+    "cargo.exe"
+  ],
+  "guardrails": {
+    "require_independent_review": true,
+    "require_human_publish_approval": true,
+    "draft_pr_only": true,
+    "direct_default_branch_push": false,
+    "production_actions_enabled": false
+  }
+}
