@@ -11,10 +11,15 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable, TypeVar
 
 from .isolation import DockerTestRunner, IsolationConfig
+from .locking import FileMutex
+
+
+T = TypeVar("T")
 
 
 TASK_STATES = {
@@ -118,6 +123,7 @@ class DevelopmentPolicy:
     draft_pr_only: bool
     direct_default_branch_push: bool
     production_actions_enabled: bool
+    required_post_merge_checks: tuple[str, ...]
     test_isolation: IsolationConfig
 
     @classmethod
@@ -132,6 +138,19 @@ class DevelopmentPolicy:
             raise ValueError("production actions must remain disabled")
         if guardrails.get("draft_pr_only") is not True:
             raise ValueError("pull requests must be draft-only")
+        required_checks = guardrails.get("required_post_merge_checks")
+        if (
+            not isinstance(required_checks, list)
+            or not required_checks
+            or any(
+                not isinstance(name, str) or not name.strip()
+                for name in required_checks
+            )
+            or len(set(required_checks)) != len(required_checks)
+        ):
+            raise ValueError(
+                "required_post_merge_checks must contain unique check names"
+            )
         limits = payload["limits"]
         return cls(
             allowed_owners=tuple(payload["allowed_owners"]),
@@ -152,10 +171,20 @@ class DevelopmentPolicy:
             draft_pr_only=True,
             direct_default_branch_push=False,
             production_actions_enabled=False,
+            required_post_merge_checks=tuple(required_checks),
             test_isolation=IsolationConfig.from_dict(
                 payload.get("test_execution")
             ),
         )
+
+
+def serialized_mutation(method: Callable[..., T]) -> Callable[..., T]:
+    @wraps(method)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> T:
+        with self.store.mutation_lock():
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 def execute_test_command(
@@ -259,9 +288,14 @@ class RepositoryRegistry:
 
 class DevelopmentStore:
     def __init__(self, runtime_root: str | Path) -> None:
-        self.root = Path(runtime_root) / "development"
+        runtime = Path(runtime_root)
+        self.root = runtime / "development"
+        self.lock_path = runtime / ".lifecycle-mutation.lock"
         self.tasks_root = self.root / "tasks"
         self.tasks_root.mkdir(parents=True, exist_ok=True)
+
+    def mutation_lock(self) -> FileMutex:
+        return FileMutex(self.lock_path, timeout_seconds=660)
 
     def task_root(self, task_id: str) -> Path:
         if not re.fullmatch(r"DEV-[a-f0-9]{16}", task_id):
@@ -285,6 +319,11 @@ class DevelopmentStore:
         )
 
     def save(self, task: dict[str, Any]) -> None:
+        target = self.task_root(task["task_id"]) / "state.json"
+        if target.is_file():
+            current = json.loads(target.read_text(encoding="utf-8"))
+            if current.get("updated_at") != task.get("updated_at"):
+                raise RuntimeError("stale development task mutation rejected")
         task["updated_at"] = utc_now()
         self._write_state(self.task_root(task["task_id"]), task)
 
@@ -336,9 +375,14 @@ class DevelopmentStore:
         ]
 
     def verify_chain(self, task_id: str) -> bool:
+        return self.verify_events(self.events(task_id))
+
+    @staticmethod
+    def verify_events(events: list[dict[str, Any]]) -> bool:
         previous_hash = "GENESIS"
-        for event in self.events(task_id):
-            actual = event.pop("event_hash")
+        for source_event in events:
+            event = dict(source_event)
+            actual = event.pop("event_hash", None)
             expected = hashlib.sha256(
                 canonical_json(event).encode("utf-8")
             ).hexdigest()
@@ -409,6 +453,7 @@ class DevelopmentController:
         if owner not in self.policy.allowed_owners:
             raise PermissionError(f"repository owner is not allowed: {owner}")
 
+    @serialized_mutation
     def start(
         self,
         *,
@@ -464,6 +509,7 @@ class DevelopmentController:
             return "high"
         return "medium"
 
+    @serialized_mutation
     def plan(self, task_id: str, *, actor: str) -> dict[str, Any]:
         task = self.store.load(task_id)
         plan = {
@@ -501,6 +547,7 @@ class DevelopmentController:
             updates={"plan": plan},
         )
 
+    @serialized_mutation
     def cancel(self, task_id: str, *, actor: str, reason: str) -> dict[str, Any]:
         task = self.store.load(task_id)
         if not actor.strip() or not reason.strip():
@@ -517,6 +564,7 @@ class DevelopmentController:
             },
         )
 
+    @serialized_mutation
     def prepare(self, task_id: str, *, actor: str) -> dict[str, Any]:
         task = self.store.load(task_id)
         repository = task["repository"]
@@ -579,6 +627,7 @@ class DevelopmentController:
             raise PermissionError("changes to .git are prohibited")
         return path
 
+    @serialized_mutation
     def apply_changes(
         self,
         task_id: str,
@@ -708,6 +757,7 @@ class DevelopmentController:
             digest.update(b"\0")
         return digest.hexdigest()
 
+    @serialized_mutation
     def test(self, task_id: str, *, actor: str) -> dict[str, Any]:
         task = self.store.load(task_id)
         if task["state"] != "changes_applied":
@@ -752,6 +802,7 @@ class DevelopmentController:
             updates={"test_runner": actor, "test_results": results},
         )
 
+    @serialized_mutation
     def review(
         self,
         task_id: str,
@@ -820,6 +871,7 @@ class DevelopmentController:
             )
         return task
 
+    @serialized_mutation
     def approve_publish(
         self,
         task_id: str,
@@ -852,30 +904,49 @@ class DevelopmentController:
             updates={"publish_approval": approval},
         )
 
+    @serialized_mutation
     def build_evidence(self, task_id: str, *, actor: str) -> dict[str, Any]:
+        return self._build_evidence(task_id, actor=actor)
+
+    def _build_evidence(self, task_id: str, *, actor: str) -> dict[str, Any]:
         task = self.store.load(task_id)
         root = self.store.task_root(task_id)
-        artifacts = {}
-        for name in ("state.json", "events.jsonl"):
-            path = root / name
-            artifacts[name] = sha256_file(path)
+        if not self.store.verify_chain(task_id):
+            raise RuntimeError("cannot package evidence from an invalid event chain")
+        evidence_id = (
+            datetime.now(timezone.utc).strftime("EVD-%Y%m%dT%H%M%S%fZ-")
+            + os.urandom(4).hex()
+        )
+        package = root / "evidence" / evidence_id
+        package.mkdir(parents=True)
+        state_snapshot = package / "state.json"
+        events_snapshot = package / "events.jsonl"
+        state_snapshot.write_bytes((root / "state.json").read_bytes())
+        events_snapshot.write_bytes((root / "events.jsonl").read_bytes())
+        artifacts = {
+            "state.json": sha256_file(state_snapshot),
+            "events.jsonl": sha256_file(events_snapshot),
+        }
         manifest = {
-            "schema_version": "1.0.0",
+            "schema_version": "2.0.0",
+            "evidence_id": evidence_id,
             "task_id": task_id,
             "repository": task["repository"]["full_name"],
             "source_sha": task["source_sha"],
             "branch": task["branch"],
-            "state": task["state"],
+            "snapshot_state": task["state"],
             "artifacts": artifacts,
             "event_chain_valid": self.store.verify_chain(task_id),
             "generated_at": utc_now(),
         }
-        path = root / "evidence-manifest.json"
+        path = package / "manifest.json"
         path.write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        self.verify_evidence_manifest(path)
         task["evidence_manifest"] = {
+            "evidence_id": evidence_id,
             "path": str(path.resolve()),
             "sha256": sha256_file(path),
         }
@@ -885,6 +956,39 @@ class DevelopmentController:
         )
         return task
 
+    @staticmethod
+    def verify_evidence_manifest(path: str | Path) -> dict[str, Any]:
+        manifest_path = Path(path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest.get("schema_version") != "2.0.0":
+            raise ValueError("unsupported evidence manifest schema")
+        artifacts = manifest.get("artifacts")
+        if not isinstance(artifacts, dict) or set(artifacts) != {
+            "state.json",
+            "events.jsonl",
+        }:
+            raise ValueError("evidence manifest artifact set is invalid")
+        for name, expected in artifacts.items():
+            artifact = manifest_path.parent / name
+            if not artifact.is_file() or sha256_file(artifact) != expected:
+                raise ValueError(f"evidence artifact hash mismatch: {name}")
+        snapshot = json.loads(
+            (manifest_path.parent / "state.json").read_text(encoding="utf-8")
+        )
+        if snapshot.get("task_id") != manifest.get("task_id"):
+            raise ValueError("evidence task identity mismatch")
+        events = [
+            json.loads(line)
+            for line in (manifest_path.parent / "events.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line
+        ]
+        if not DevelopmentStore.verify_events(events):
+            raise ValueError("evidence snapshot event chain is invalid")
+        return manifest
+
+    @serialized_mutation
     def publish(
         self,
         task_id: str,
@@ -971,7 +1075,7 @@ class DevelopmentController:
                 }
             },
         )
-        return self.build_evidence(task_id, actor=actor)
+        return self._build_evidence(task_id, actor=actor)
 
     @staticmethod
     def _github_request(
@@ -999,6 +1103,7 @@ class DevelopmentController:
             detail = exc.read().decode("utf-8", errors="replace")[-2000:]
             raise RuntimeError(f"GitHub API failed ({exc.code}): {detail}") from exc
 
+    @serialized_mutation
     def verify_merge(
         self,
         task_id: str,
@@ -1007,6 +1112,8 @@ class DevelopmentController:
         token: str | None = None,
     ) -> dict[str, Any]:
         task = self.store.load(task_id)
+        if task["state"] != "published":
+            raise ValueError(f"cannot verify merge from state: {task['state']}")
         if not task.get("pull_request"):
             raise ValueError("task has no pull request")
         github_token = token or os.environ.get("GITHUB_TOKEN")
@@ -1017,13 +1124,30 @@ class DevelopmentController:
         pr = self._github_request("GET", f"/repos/{full_name}/pulls/{number}", github_token)
         if not pr.get("merged_at"):
             raise RuntimeError("pull request is not merged")
+        reviewed_head = task["pull_request"].get("head_sha")
+        merged_head = pr.get("head", {}).get("sha")
+        if not reviewed_head or merged_head != reviewed_head:
+            raise PermissionError(
+                "merged pull-request head does not match the reviewed published head"
+            )
         merge_sha = pr["merge_commit_sha"]
         checks = self._github_request(
             "GET", f"/repos/{full_name}/commits/{merge_sha}/check-runs", github_token
         )
+        check_runs = checks.get("check_runs", [])
+        by_name = {item.get("name"): item for item in check_runs}
+        missing = [
+            name
+            for name in self.policy.required_post_merge_checks
+            if name not in by_name
+        ]
+        if missing:
+            raise RuntimeError(
+                f"required post-merge checks are missing: {missing}"
+            )
         incomplete = [
             item["name"]
-            for item in checks.get("check_runs", [])
+            for item in check_runs
             if item.get("status") != "completed" or item.get("conclusion") != "success"
         ]
         if incomplete:
@@ -1037,11 +1161,14 @@ class DevelopmentController:
                 "merge_verification": {
                     "merge_sha": merge_sha,
                     "merged_at": pr["merged_at"],
-                    "check_runs": len(checks.get("check_runs", [])),
+                    "check_runs": len(check_runs),
+                    "required_checks": list(
+                        self.policy.required_post_merge_checks
+                    ),
                 }
             },
         )
-        return self.build_evidence(task_id, actor=actor)
+        return self._build_evidence(task_id, actor=actor)
 
     def monitor(self) -> dict[str, Any]:
         tasks = self.store.list_tasks()
@@ -1073,8 +1200,13 @@ ONBOARDING_STATES = {
 
 class OnboardingStore:
     def __init__(self, runtime_root: str | Path) -> None:
-        self.root = Path(runtime_root) / "development" / "onboarding"
+        runtime = Path(runtime_root)
+        self.root = runtime / "development" / "onboarding"
+        self.lock_path = runtime / ".lifecycle-mutation.lock"
         self.root.mkdir(parents=True, exist_ok=True)
+
+    def mutation_lock(self) -> FileMutex:
+        return FileMutex(self.lock_path, timeout_seconds=660)
 
     @staticmethod
     def onboarding_id(full_name: str) -> str:
@@ -1096,9 +1228,14 @@ class OnboardingStore:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def save(self, record: dict[str, Any]) -> None:
-        record["updated_at"] = utc_now()
         root = self.record_root(record["full_name"])
         root.mkdir(parents=True, exist_ok=True)
+        target = root / "state.json"
+        if target.is_file():
+            current = json.loads(target.read_text(encoding="utf-8"))
+            if current.get("updated_at") != record.get("updated_at"):
+                raise RuntimeError("stale onboarding record mutation rejected")
+        record["updated_at"] = utc_now()
         temporary = root / "state.json.tmp"
         temporary.write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n",
@@ -1177,6 +1314,7 @@ class RepositoryOnboardingController:
         self.registry = registry
         self.store = OnboardingStore(runtime_root)
 
+    @serialized_mutation
     def discover(
         self,
         repositories: list[dict[str, Any]],
@@ -1373,6 +1511,7 @@ class RepositoryOnboardingController:
             risks.append("no_executable_test_contract_detected")
         return sorted(set(frameworks)), commands, sorted(set(risks))
 
+    @serialized_mutation
     def assess(self, full_name: str, *, actor: str) -> dict[str, Any]:
         record = self.store.load(full_name)
         if record["state"] not in {"discovered", "assessment_blocked", "smoke_failed"}:
@@ -1416,6 +1555,7 @@ class RepositoryOnboardingController:
         )
         return record
 
+    @serialized_mutation
     def set_contract(
         self,
         full_name: str,
@@ -1455,6 +1595,7 @@ class RepositoryOnboardingController:
         )
         return record
 
+    @serialized_mutation
     def approve(
         self,
         full_name: str,
@@ -1491,6 +1632,7 @@ class RepositoryOnboardingController:
         )
         return record
 
+    @serialized_mutation
     def activate(self, full_name: str, *, actor: str) -> dict[str, Any]:
         record = self.store.load(full_name)
         if record["state"] != "approved":
@@ -1574,6 +1716,7 @@ class RepositoryOnboardingController:
         )
         return record
 
+    @serialized_mutation
     def suspend(
         self,
         name: str,
@@ -1623,6 +1766,7 @@ class RepositoryOnboardingController:
         )
         return record
 
+    @serialized_mutation
     def resume_onboarding(
         self,
         full_name: str,
