@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/agentic-engineering/repository-onboarding.schema.json",
+  "title": "Repository Onboarding Record",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "onboarding_id",
+    "full_name",
+    "name",
+    "state",
+    "metadata",
+    "frameworks",
+    "proposed_test_commands",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "onboarding_id": {"type": "string", "pattern": "^ONB-[a-f0-9]{16}$"},
+    "full_name": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "name": {"type": "string", "minLength": 1},
+    "state": {
+      "enum": [
+        "discovered",
+        "assessment_blocked",
+        "awaiting_onboarding_approval",
+        "approved",
+        "smoke_failed",
+        "active",
+        "suspended"
+      ]
+    },
+    "metadata": {"type": "object"},
+    "frameworks": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "proposed_test_commands": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "string"}
+      }
+    },
+    "assessment": {"type": ["object", "null"]},
+    "approval": {"type": ["object", "null"]},
+    "smoke_result": {"type": ["object", "null"]},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,17 +1,19 @@
 # Agentic Engineering Control Plane
 
-A standalone, governed control plane for auditing every repository owned by
-[`SuriyaBoon`](https://github.com/SuriyaBoon) and carrying accepted findings
-through a controlled work lifecycle.
+A standalone, governed protocol for controlling development across registered
+[`SuriyaBoon`](https://github.com/SuriyaBoon) repositories. It also retains the
+read-only portfolio audit and governed finding workflow from version 0.2.
 
-The system covers repository inventory, intent/policy validation, planning,
-agent routing, bounded tool selection, dry-run execution, independent
-validation, approval-gated closure, persistent event memory, response
-generation, and monitoring.
+Version 0.4 adds dynamic repository onboarding plus intent/risk
+classification, planning, agent routing, immutable
+source identity, isolated clone/branch workspaces, bounded text change sets,
+registered test contracts, independent review, acceptance evidence, explicit
+human publish approval, task-branch push, draft pull requests, post-merge check
+verification, hash-chained memory, and monitoring.
 
-Source repositories remain read-only. This portfolio/lab system demonstrates
-the complete governed workflow without claiming autonomous production
-remediation.
+The original source checkout remains read-only. Changes occur only in a
+per-task isolated clone. Direct default-branch pushes, automatic merge,
+deployment, and production infrastructure actions are prohibited.
 
 ## Verified scope
 
@@ -23,10 +25,48 @@ remediation.
 - Governed work-item state machine with SLA, bounded retry, and manual fallback.
 - Independent execution approval, executor, validator, and closure approver.
 - SQLite operational memory with an append-only SHA-256 event chain.
-- Dry-run remediation artifacts only; no source mutation or production action.
+- Ten registered ecosystem repositories with source-verified test or static
+  validation entry points.
+- Dynamic GitHub discovery with quarantine, deterministic framework/test
+  assessment, independent onboarding approval, isolated smoke validation,
+  runtime activation, and suspension.
+- Generated `agentic/DEV-*` branches and immutable source SHA capture.
+- File/line/size/retry/test-executable budgets and path traversal protection.
+- Independent test, review, secret scan, and acceptance-evidence gates.
+- Exact human approval required before a task-branch push and draft PR.
+- Reviewed-diff and base-branch drift checks before publication.
+- GitHub merge and post-merge check verification; no merge operation exists.
+- Production actions remain disabled.
 - Deterministic operation without an LLM or third-party Python package.
 
-## End-to-end flow
+## Development control flow
+
+```mermaid
+flowchart LR
+    U["User request"] --> I["Intent and risk"]
+    I --> P["Plan and agent routing"]
+    P --> W["Isolated clone and task branch"]
+    W --> C["Coder change set"]
+    C --> T["Independent tests"]
+    T --> R["Independent review"]
+    R --> H{"Human publish approval"}
+    H -- "Rejected" --> M["Manual review"]
+    H -- "Approved" --> D["Commit and task-branch push"]
+    D --> PR["Draft pull request"]
+    PR --> HM["Human merge"]
+    HM --> V["Post-merge checks"]
+    V --> E["Evidence and monitoring"]
+```
+
+This is a development protocol outside the target repositories. SentinelGRC
+remains the ecosystem's security-governance application; it is simply one
+possible target of this development controller.
+
+See [Governed cross-repository development protocol](docs/DEVELOPMENT-PROTOCOL.md)
+for inputs, outputs, decisions, roles, retry/fallback behavior, metrics,
+guardrails, commands, and pseudocode.
+
+## Read-only audit and finding flow
 
 ```mermaid
 flowchart LR
@@ -51,7 +91,7 @@ flowchart LR
     E --> O["Response and monitoring"]
 ```
 
-## Ten-stage Agentic Engineering mapping
+## Audit workflow mapping
 
 | Stage | Implementation | Output |
 |---|---|---|
@@ -119,8 +159,38 @@ Requires Python 3.11 or newer.
 ```powershell
 python -m ae_control_plane.cli doctor
 python -m ae_control_plane.cli agents
+python -m ae_control_plane.cli repo-list
+python -m ae_control_plane.cli repo-onboarding-monitor
 python -B -m unittest discover -v -s tests
 ```
+
+Discover future repositories without granting development authority:
+
+```powershell
+python -m ae_control_plane.cli repo-sync `
+  --owner SuriyaBoon --actor discovery-agent
+```
+
+New repositories remain quarantined until `repo-assess`,
+`repo-onboard-approve`, and `repo-activate` all succeed.
+
+Start a governed development task:
+
+```powershell
+python -m ae_control_plane.cli dev-start `
+  --repository SentinelGRC `
+  --intent "Add a contract test for security_alert.v1" `
+  --acceptance "The fixture is validated" `
+  --acceptance "The existing suite remains green" `
+  --actor requester
+```
+
+Continue through `dev-plan`, `dev-prepare`, `dev-apply`, `dev-test`,
+`dev-review`, `dev-evidence`, and `dev-approve`. Only after the owner records
+the exact approval may `dev-publish` push the generated branch and create a
+draft PR. `dev-verify-merge` closes the loop after a human merge and successful
+post-merge checks. The complete command sequence is in
+[`docs/DEVELOPMENT-PROTOCOL.md`](docs/DEVELOPMENT-PROTOCOL.md).
 
 Audit every available repository and create governed work items:
 
