@@ -4,12 +4,13 @@ A standalone, governed protocol for controlling development across registered
 [`SuriyaBoon`](https://github.com/SuriyaBoon) repositories. It also retains the
 read-only portfolio audit and governed finding workflow from version 0.2.
 
-Version 0.4 adds dynamic repository onboarding plus intent/risk
+Version 0.6 combines dynamic repository onboarding with intent/risk
 classification, planning, agent routing, immutable
 source identity, isolated clone/branch workspaces, bounded text change sets,
 registered test contracts, independent review, acceptance evidence, explicit
 human publish approval, task-branch push, draft pull requests, post-merge check
-verification, hash-chained memory, and monitoring.
+verification, snapshot evidence packages, serialized lifecycle mutation,
+hash-chained memory, and monitoring.
 
 The original source checkout remains read-only. Changes occur only in a
 per-task isolated clone. Direct default-branch pushes, automatic merge,
@@ -35,7 +36,12 @@ deployment, and production infrastructure actions are prohibited.
 - Independent test, review, secret scan, and acceptance-evidence gates.
 - Exact human approval required before a task-branch push and draft PR.
 - Reviewed-diff and base-branch drift checks before publication.
-- GitHub merge and post-merge check verification; no merge operation exists.
+- GitHub merge verification requires the exact reviewed PR head SHA and every
+  policy-required post-merge check; no merge operation exists.
+- Versioned evidence packages preserve state/event snapshots and verify every
+  artifact hash before the live lifecycle records the manifest.
+- A cross-process file mutex serializes development and onboarding mutations;
+  stale task/record writes fail closed.
 - Production actions remain disabled.
 - Deterministic operation without an LLM or third-party Python package.
 
@@ -300,7 +306,19 @@ workflow/
 `-- executions/
     `-- WORK-.../
         `-- attempt-1.json
+
+development/tasks/DEV-.../
+|-- state.json
+|-- events.jsonl
+`-- evidence/EVD-.../
+    |-- state.json
+    |-- events.jsonl
+    `-- manifest.json
 ```
+
+The evidence package contains immutable snapshots. The live `state.json` and
+`events.jsonl` then record the manifest path and SHA-256, avoiding a circular or
+immediately stale manifest hash.
 
 ## Retry and fallback
 

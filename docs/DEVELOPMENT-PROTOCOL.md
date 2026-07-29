@@ -244,8 +244,11 @@ python -m ae_control_plane.cli dev-verify-merge `
 5. A workspace change after review invalidates publication.
 6. A moved base branch invalidates publication and requires replanning.
 7. Missing GitHub credentials fail before commit or push.
-8. Merge verification fails while the PR is open or any check is incomplete or
-   unsuccessful.
+8. Merge verification fails while the PR is open, the merged PR head differs
+   from the reviewed/published head, a policy-required check is missing, or any
+   returned check is incomplete or unsuccessful.
+9. Development and onboarding mutations share a cross-process file mutex and
+   reject stale state writes.
 
 ## Metrics
 
@@ -297,11 +300,15 @@ publisher.push_generated_branch_only()
 pr = github.create_draft_pr()
 
 wait_for_human_merge(pr)
+assert pr.head_sha == task.published_head_sha
 checks = github.post_merge_checks(pr.merge_sha)
+assert policy.required_post_merge_checks <= checks.successful_names
 if all(checks.success):
     transition(MERGED_VERIFIED)
 
-memory.write_hash_chain_and_evidence_manifest()
+memory.snapshot_state_and_event_chain()
+memory.write_and_verify_evidence_manifest()
+memory.anchor_manifest_sha_in_live_event_chain()
 monitor.report()
 ```
 
@@ -313,6 +320,7 @@ The controller is operational, but it deliberately does not supply:
 - package installation or dependency trust decisions;
 - identity-provider proof that an actor string belongs to a human;
 - GitHub branch protection configuration;
+- durable runtime storage and transactional recovery after host power loss;
 - human PR merge; or
 - deployment/production credentials.
 

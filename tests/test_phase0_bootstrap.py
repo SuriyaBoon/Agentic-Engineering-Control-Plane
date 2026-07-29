@@ -84,6 +84,7 @@ class PhaseZeroBootstrapTests(unittest.TestCase):
                         "draft_pr_only": True,
                         "direct_default_branch_push": False,
                         "production_actions_enabled": False,
+                        "required_post_merge_checks": ["validate"],
                     },
                 }
             ),

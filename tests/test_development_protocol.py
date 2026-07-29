@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ae_control_plane.development import (
     DevelopmentController,
@@ -76,6 +77,7 @@ class DevelopmentProtocolTests(unittest.TestCase):
                         "draft_pr_only": True,
                         "direct_default_branch_push": False,
                         "production_actions_enabled": False,
+                        "required_post_merge_checks": ["validate"],
                     },
                 }
             ),
@@ -167,12 +169,133 @@ class DevelopmentProtocolTests(unittest.TestCase):
         evidence = self.controller.build_evidence(
             task_id, actor="evidence-agent"
         )
-        self.assertTrue(Path(evidence["evidence_manifest"]["path"]).is_file())
+        manifest_path = Path(evidence["evidence_manifest"]["path"])
+        self.assertTrue(manifest_path.is_file())
+        manifest = self.controller.verify_evidence_manifest(manifest_path)
+        self.assertEqual(manifest["schema_version"], "2.0.0")
+        self.assertEqual(manifest["task_id"], task_id)
         self.assertTrue(self.controller.store.verify_chain(task_id))
+        # Live state/events changed when the manifest reference was recorded,
+        # but the packaged snapshot must remain independently verifiable.
+        self.controller.verify_evidence_manifest(manifest_path)
+        snapshot = manifest_path.parent / "state.json"
+        snapshot.write_text("tampered", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            self.controller.verify_evidence_manifest(manifest_path)
         self.assertEqual(
             (self.source / "README.md").read_text(encoding="utf-8"),
             "# Fixture\n",
         )
+
+    def _published_fixture(self) -> tuple[str, str]:
+        task_id = self.start_and_prepare()
+        self.apply_fixture_change(task_id)
+        self.controller.test(task_id, actor="test-runner")
+        self.controller.review(
+            task_id,
+            actor="reviewer-agent",
+            acceptance_evidence=["README content inspected after tests."],
+        )
+        approved = self.controller.approve_publish(
+            task_id,
+            actor="repo-owner",
+            confirmation=f"APPROVE {task_id}",
+            comment="Reviewed for a draft PR.",
+        )
+        reviewed_head = "a" * 40
+        self.controller.store.transition(
+            approved,
+            "published",
+            actor="publisher",
+            reason="Synthetic published fixture.",
+            updates={
+                "pull_request": {
+                    "number": 7,
+                    "url": "https://example.invalid/pull/7",
+                    "draft": True,
+                    "head_sha": reviewed_head,
+                }
+            },
+        )
+        return task_id, reviewed_head
+
+    def test_merge_verification_requires_immutable_head_and_required_ci(self) -> None:
+        task_id, reviewed_head = self._published_fixture()
+        auth = {"to" + "ken": "synthetic"}
+        changed_pr = {
+            "merged_at": "2026-01-01T00:00:00Z",
+            "merge_commit_sha": "b" * 40,
+            "head": {"sha": "c" * 40},
+        }
+        with patch.object(
+            self.controller,
+            "_github_request",
+            return_value=changed_pr,
+        ):
+            with self.assertRaisesRegex(PermissionError, "reviewed published head"):
+                self.controller.verify_merge(
+                    task_id, actor="post-merge-verifier", **auth
+                )
+
+        matching_pr = {
+            **changed_pr,
+            "head": {"sha": reviewed_head},
+        }
+        with patch.object(
+            self.controller,
+            "_github_request",
+            side_effect=[matching_pr, {"check_runs": []}],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "checks are missing"):
+                self.controller.verify_merge(
+                    task_id, actor="post-merge-verifier", **auth
+                )
+
+        successful_checks = {
+            "check_runs": [
+                {
+                    "name": "validate",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            ]
+        }
+        with patch.object(
+            self.controller,
+            "_github_request",
+            side_effect=[matching_pr, successful_checks],
+        ):
+            verified = self.controller.verify_merge(
+                task_id, actor="post-merge-verifier", **auth
+            )
+        self.assertEqual(verified["state"], "merged_verified")
+        self.assertEqual(
+            verified["merge_verification"]["required_checks"],
+            ["validate"],
+        )
+
+    def test_stale_task_transition_is_rejected(self) -> None:
+        task = self.controller.start(
+            repository_name="fixture",
+            intent="Test stale transitions",
+            acceptance_criteria=["Only one transition is recorded"],
+            actor="requester",
+        )
+        first = self.controller.store.load(task["task_id"])
+        stale = self.controller.store.load(task["task_id"])
+        self.controller.store.transition(
+            first,
+            "planned",
+            actor="planner-one",
+            reason="First transition.",
+        )
+        with self.assertRaisesRegex(RuntimeError, "stale"):
+            self.controller.store.transition(
+                stale,
+                "planned",
+                actor="planner-two",
+                reason="Stale transition.",
+            )
 
     def test_path_traversal_is_blocked(self) -> None:
         task_id = self.start_and_prepare()
@@ -278,6 +401,7 @@ class DevelopmentProtocolTests(unittest.TestCase):
                 "draft_pr_only": True,
                 "direct_default_branch_push": True,
                 "production_actions_enabled": False,
+                "required_post_merge_checks": ["validate"],
             },
         }
         path.write_text(json.dumps(payload), encoding="utf-8")

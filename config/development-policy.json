@@ -52,6 +52,9 @@
     "require_human_publish_approval": true,
     "draft_pr_only": true,
     "direct_default_branch_push": false,
-    "production_actions_enabled": false
+    "production_actions_enabled": false,
+    "required_post_merge_checks": [
+      "validate"
+    ]
   }
 }

@@ -19,6 +19,11 @@ The Control Plane policy, task state, event chain, human approvals, GitHub
 branch protections, container engine, and host operating system are trusted
 dependencies.
 
+Lifecycle mutations are serialized with an OS-backed cross-process file mutex,
+and stale state objects are rejected. Evidence generation snapshots task state
+and its hash-chained events into a versioned package, verifies the package
+hashes, and only then anchors the manifest SHA-256 in the live lifecycle.
+
 ## Enforced container controls
 
 Python test contracts use the digest-pinned image recorded in
@@ -71,6 +76,12 @@ this boundary.
 Only Python test contracts are supported by the Phase 0 Docker adapter.
 PowerShell, Node.js, Go, Rust, and other contracts fail closed until a
 separately pinned and tested runner is configured for each runtime.
+
+The default runtime remains under the host temporary directory. File locking
+prevents concurrent writers but is not a transactional database and does not
+make temporary storage durable across host cleanup or catastrophic power loss.
+GitHub branch protection is a required trusted dependency but is configured
+outside this repository and must be verified independently.
 
 GitHub remains responsible for CI. Humans remain responsible for publish
 approval and merge. The Control Plane cannot push a default branch, merge a
