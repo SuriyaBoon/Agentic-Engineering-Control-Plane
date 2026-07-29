@@ -74,6 +74,10 @@ class PhaseZeroBootstrapTests(unittest.TestCase):
                         "python",
                         Path(sys.executable).name.lower(),
                     ],
+                    "test_execution": {
+                        "mode": "host",
+                        "trusted_host_execution": True,
+                    },
                     "guardrails": {
                         "require_independent_review": True,
                         "require_human_publish_approval": True,

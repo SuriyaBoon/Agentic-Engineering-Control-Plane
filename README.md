@@ -192,6 +192,21 @@ draft PR. `dev-verify-merge` closes the loop after a human merge and successful
 post-merge checks. The complete command sequence is in
 [`docs/DEVELOPMENT-PROTOCOL.md`](docs/DEVELOPMENT-PROTOCOL.md).
 
+### Phase 0 Docker isolation
+
+Untrusted Python repository tests run through a fail-closed Docker adapter.
+The policy pins the runner by SHA-256 digest and disables network access,
+mounts the isolated workspace read-only, runs as a numeric non-root user,
+drops capabilities, enables `no-new-privileges`, and applies PID, CPU, memory,
+temporary-storage, and wall-clock limits. Docker or image unavailability and
+unsupported runtimes are errors; the runner never silently falls back to host
+execution.
+
+This is a production-shaped concept boundary, not a complete multi-tenant
+sandbox. See [`docs/PHASE-0-THREAT-MODEL.md`](docs/PHASE-0-THREAT-MODEL.md)
+for assumptions, adversarial tests, limitations, and the live validation
+command.
+
 Audit every available repository and create governed work items:
 
 ```powershell
