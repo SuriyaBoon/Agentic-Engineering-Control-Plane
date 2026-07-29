@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .isolation import DockerTestRunner, IsolationConfig
+
 
 TASK_STATES = {
     "created",
@@ -116,6 +118,7 @@ class DevelopmentPolicy:
     draft_pr_only: bool
     direct_default_branch_push: bool
     production_actions_enabled: bool
+    test_isolation: IsolationConfig
 
     @classmethod
     def load(cls, path: str | Path) -> "DevelopmentPolicy":
@@ -149,7 +152,40 @@ class DevelopmentPolicy:
             draft_pr_only=True,
             direct_default_branch_push=False,
             production_actions_enabled=False,
+            test_isolation=IsolationConfig.from_dict(
+                payload.get("test_execution")
+            ),
         )
+
+
+def execute_test_command(
+    policy: DevelopmentPolicy,
+    argv: list[str],
+    *,
+    workspace: Path,
+    output_dir: Path,
+) -> subprocess.CompletedProcess[str]:
+    if not isinstance(argv, list) or not argv:
+        raise ValueError("test commands must be non-empty argument arrays")
+    executable = Path(str(argv[0])).name.lower()
+    if executable not in policy.allowed_test_executables:
+        raise PermissionError(f"test executable is not allowed: {executable}")
+    if policy.test_isolation.mode == "docker":
+        return DockerTestRunner(policy.test_isolation).run(
+            [str(part) for part in argv],
+            workspace=workspace,
+            output_dir=output_dir,
+            timeout=policy.test_timeout_seconds,
+        )
+    resolved = [str(part) for part in argv]
+    if executable in {"python", "python.exe"}:
+        resolved[0] = sys.executable
+    return run_command(
+        resolved,
+        cwd=workspace,
+        timeout=policy.test_timeout_seconds,
+        check=False,
+    )
 
 
 class RepositoryRegistry:
@@ -690,19 +726,11 @@ class DevelopmentController:
         results = []
         passed = True
         for argv in commands:
-            if not isinstance(argv, list) or not argv:
-                raise ValueError("test commands must be non-empty argument arrays")
-            executable = Path(str(argv[0])).name.lower()
-            if executable not in self.policy.allowed_test_executables:
-                raise PermissionError(f"test executable is not allowed: {executable}")
-            resolved_argv = [str(part) for part in argv]
-            if executable in {"python", "python.exe"}:
-                resolved_argv[0] = sys.executable
-            result = run_command(
-                resolved_argv,
-                cwd=workspace,
-                timeout=self.policy.test_timeout_seconds,
-                check=False,
+            result = execute_test_command(
+                self.policy,
+                argv,
+                workspace=workspace,
+                output_dir=self.store.task_root(task_id) / "container-output",
             )
             results.append(
                 {
@@ -1487,17 +1515,11 @@ class RepositoryOnboardingController:
         results = []
         passed = True
         for argv in record["proposed_test_commands"]:
-            executable = Path(str(argv[0])).name.lower()
-            if executable not in self.policy.allowed_test_executables:
-                raise PermissionError(f"test executable is not allowed: {executable}")
-            resolved = [str(part) for part in argv]
-            if executable in {"python", "python.exe"}:
-                resolved[0] = sys.executable
-            result = run_command(
-                resolved,
-                cwd=workspace,
-                timeout=self.policy.test_timeout_seconds,
-                check=False,
+            result = execute_test_command(
+                self.policy,
+                argv,
+                workspace=workspace,
+                output_dir=self.store.record_root(full_name) / "container-output",
             )
             results.append(
                 {

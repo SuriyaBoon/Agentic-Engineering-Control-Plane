@@ -136,9 +136,10 @@ python -m ae_control_plane.cli repo-activate `
 ```
 
 The approval explicitly authorizes execution of the displayed test contract
-inside the assessment clone. Repository tests are code and may have side
-effects within the operating-system account; use a disposable VM/container
-when onboarding code that is not already trusted by the owner.
+inside the assessment clone. The versioned Phase 0 policy routes supported
+Python contracts through the Docker adapter described in
+`docs/PHASE-0-THREAT-MODEL.md`. Unsupported runtimes fail closed. Explicit host
+mode is reserved for trusted Control Plane unit-test fixtures.
 
 Activation writes only to the runtime registry
 `development/active-repositories.json`; it does not edit the target repository.

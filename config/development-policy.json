@@ -35,6 +35,18 @@
     "cargo",
     "cargo.exe"
   ],
+  "test_execution": {
+    "mode": "docker",
+    "docker": {
+      "executable": "docker",
+      "image": "docker.io/library/python@sha256:9bed8554e926c07c6f908841d5ee88c33e8df9236b191526bbce81a9062ab43a",
+      "user": "65532:65532",
+      "memory": "1g",
+      "cpus": "1.0",
+      "pids_limit": 128,
+      "tmpfs_size": "128m"
+    }
+  },
   "guardrails": {
     "require_independent_review": true,
     "require_human_publish_approval": true,
