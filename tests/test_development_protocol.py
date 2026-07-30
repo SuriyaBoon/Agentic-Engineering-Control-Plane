@@ -306,6 +306,49 @@ class DevelopmentProtocolTests(unittest.TestCase):
             ["validate"],
         )
 
+    def test_required_checks_are_repository_specific_and_snapshotted(self) -> None:
+        repository = self.controller.registry.repositories["fixture"]
+        repository["required_post_merge_checks"] = ["test", "container-smoke"]
+        task = self.controller.start(
+            repository_name="fixture",
+            intent="Snapshot repository checks",
+            acceptance_criteria=["Repository checks remain immutable"],
+            actor="requester",
+        )
+        self.assertEqual(
+            task["required_post_merge_checks"],
+            ["test", "container-smoke"],
+        )
+        repository["required_post_merge_checks"] = ["changed-after-start"]
+        self.assertEqual(
+            self.controller._task_required_checks(task),
+            ("test", "container-smoke"),
+        )
+
+    def test_legacy_task_uses_explicit_active_repository_check_contract(self) -> None:
+        task = {
+            "repository": {"name": "fixture"},
+        }
+        self.controller.registry.repositories["fixture"][
+            "required_post_merge_checks"
+        ] = ["test", "container-smoke"]
+        self.assertEqual(
+            self.controller._task_required_checks(task),
+            ("test", "container-smoke"),
+        )
+
+    def test_invalid_repository_check_contract_is_rejected(self) -> None:
+        repository = self.controller.registry.repositories["fixture"]
+        for invalid in ([], ["test", "test"], [""]):
+            repository["required_post_merge_checks"] = invalid
+            with self.assertRaisesRegex(ValueError, "required_post_merge_checks"):
+                self.controller.start(
+                    repository_name="fixture",
+                    intent="Reject invalid checks",
+                    acceptance_criteria=["Invalid contract fails closed"],
+                    actor="requester",
+                )
+
     def test_stale_task_transition_is_rejected(self) -> None:
         task = self.controller.start(
             repository_name="fixture",
