@@ -442,11 +442,12 @@ class DevelopmentController:
             path = (self.registry.path.parent / path).resolve()
         return path
 
-    def _source(self, repository: dict[str, Any]) -> str:
-        local = self._resolve_local_path(repository)
-        if local and (local / ".git").exists():
-            return str(local)
-        return str(repository["clone_url"])
+    @staticmethod
+    def _source(repository: dict[str, Any]) -> str:
+        source = str(repository.get("clone_url", "")).strip()
+        if not source:
+            raise ValueError("repository clone_url is required")
+        return source
 
     def _check_owner(self, repository: dict[str, Any]) -> None:
         owner = str(repository["full_name"]).split("/", 1)[0]
@@ -578,20 +579,9 @@ class DevelopmentController:
                 raise PermissionError("invalid incomplete workspace path")
             shutil.rmtree(workspace)
         source = self._source(repository)
-        clone_prefix = ["git"]
-        local = self._resolve_local_path(repository)
-        if local and str(local) == source:
-            clone_prefix.extend(
-                [
-                    "-c",
-                    f"safe.directory={local.resolve()}",
-                    "-c",
-                    f"safe.directory={(local / '.git').resolve()}",
-                ]
-            )
         run_command(
-            clone_prefix
-            + [
+            [
+                "git",
                 "clone",
                 "--no-tags",
                 "--single-branch",

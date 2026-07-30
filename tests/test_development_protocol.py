@@ -129,6 +129,38 @@ class DevelopmentProtocolTests(unittest.TestCase):
         )
         return task["task_id"]
 
+    def test_prepare_uses_registered_clone_url_not_stale_local_path(self) -> None:
+        stale = self.root / "stale-local"
+        stale.mkdir()
+        git(["init", "-b", "main"], stale)
+        (stale / "README.md").write_text("# Stale local checkout\n", encoding="utf-8")
+        git(["add", "README.md"], stale)
+        git(
+            [
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "stale",
+            ],
+            stale,
+        )
+        self.controller.registry.repositories["fixture"]["local_path"] = str(stale)
+        expected_remote_sha = git(["rev-parse", "HEAD"], self.source)
+        stale_sha = git(["rev-parse", "HEAD"], stale)
+
+        task_id = self.start_and_prepare()
+        prepared = self.controller.store.load(task_id)
+
+        self.assertEqual(prepared["source_sha"], expected_remote_sha)
+        self.assertNotEqual(prepared["source_sha"], stale_sha)
+        self.assertEqual(
+            (Path(prepared["workspace"]) / "README.md").read_text(encoding="utf-8"),
+            "# Fixture\n",
+        )
+
     def apply_fixture_change(self, task_id: str, content: str = "# Fixture\nGoverned.\n") -> None:
         path = self.root / "change-set.json"
         path.write_text(
