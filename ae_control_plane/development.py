@@ -454,6 +454,38 @@ class DevelopmentController:
         if owner not in self.policy.allowed_owners:
             raise PermissionError(f"repository owner is not allowed: {owner}")
 
+    def _repository_required_checks(
+        self, repository: dict[str, Any]
+    ) -> tuple[str, ...]:
+        raw = repository.get(
+            "required_post_merge_checks",
+            self.policy.required_post_merge_checks,
+        )
+        if (
+            not isinstance(raw, (list, tuple))
+            or not raw
+            or any(not isinstance(name, str) or not name.strip() for name in raw)
+        ):
+            raise ValueError(
+                "required_post_merge_checks must be a non-empty list of check names"
+            )
+        normalized = tuple(name.strip() for name in raw)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("required_post_merge_checks must contain unique check names")
+        return normalized
+
+    def _task_required_checks(self, task: dict[str, Any]) -> tuple[str, ...]:
+        snapshot = task.get("required_post_merge_checks")
+        if snapshot is not None:
+            return self._repository_required_checks(
+                {"required_post_merge_checks": snapshot}
+            )
+        # Backward-compatible path for tasks created before check contracts were
+        # snapshotted. The active registry must explicitly carry the contract;
+        # otherwise the global fail-closed policy remains authoritative.
+        repository = self.registry.get(task["repository"]["name"])
+        return self._repository_required_checks(repository)
+
     @serialized_mutation
     def start(
         self,
@@ -467,6 +499,7 @@ class DevelopmentController:
             raise ValueError("intent and acceptance criteria are required")
         repository = self.registry.get(repository_name)
         self._check_owner(repository)
+        required_checks = self._repository_required_checks(repository)
         risk = self._classify_risk(intent)
         base = str(repository["default_branch"])
         task_id = stable_id(
@@ -482,6 +515,7 @@ class DevelopmentController:
             "state": "created",
             "base_branch": base,
             "branch": f"agentic/{task_id.lower()}",
+            "required_post_merge_checks": list(required_checks),
             "source_sha": None,
             "workspace": None,
             "plan": None,
@@ -1126,9 +1160,10 @@ class DevelopmentController:
         )
         check_runs = checks.get("check_runs", [])
         by_name = {item.get("name"): item for item in check_runs}
+        required_checks = self._task_required_checks(task)
         missing = [
             name
-            for name in self.policy.required_post_merge_checks
+            for name in required_checks
             if name not in by_name
         ]
         if missing:
@@ -1153,7 +1188,7 @@ class DevelopmentController:
                     "merged_at": pr["merged_at"],
                     "check_runs": len(check_runs),
                     "required_checks": list(
-                        self.policy.required_post_merge_checks
+                        required_checks
                     ),
                 }
             },

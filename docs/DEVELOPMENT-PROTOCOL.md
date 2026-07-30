@@ -302,7 +302,8 @@ pr = github.create_draft_pr()
 wait_for_human_merge(pr)
 assert pr.head_sha == task.published_head_sha
 checks = github.post_merge_checks(pr.merge_sha)
-assert policy.required_post_merge_checks <= checks.successful_names
+required_checks = task.required_post_merge_checks
+assert required_checks <= checks.successful_names
 if all(checks.success):
     transition(MERGED_VERIFIED)
 
