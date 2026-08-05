@@ -6,7 +6,6 @@
       "full_name": "SuriyaBoon/SentinelGRC",
       "clone_url": "https://github.com/SuriyaBoon/SentinelGRC.git",
       "default_branch": "main",
-      "local_path": "../../SentinelGRC",
       "required_post_merge_checks": ["test", "container-smoke"],
       "test_commands": [
         ["python", "-m", "unittest", "discover", "-v", "-p", "test_*.py"]
