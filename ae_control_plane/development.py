@@ -63,6 +63,20 @@ SECRET_PATTERNS = (
 )
 
 
+def added_diff_content(diff: str) -> str:
+    """Return only added hunk lines, excluding diff metadata and old context."""
+    added_lines = []
+    inside_hunk = False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            inside_hunk = False
+        elif line.startswith("@@"):
+            inside_hunk = True
+        elif inside_hunk and line.startswith("+"):
+            added_lines.append(line[1:])
+    return "\n".join(added_lines)
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -858,7 +872,8 @@ class DevelopmentController:
         failures = []
         if not metrics["changed_files"]:
             failures.append("no_changes")
-        if any(pattern.search(diff + untracked_content) for pattern in SECRET_PATTERNS):
+        review_content = added_diff_content(diff) + untracked_content
+        if any(pattern.search(review_content) for pattern in SECRET_PATTERNS):
             failures.append("potential_secret_detected")
         if not task["test_results"] or any(
             result["exit_code"] != 0 for result in task["test_results"]

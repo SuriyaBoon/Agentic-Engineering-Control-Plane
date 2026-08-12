@@ -421,6 +421,86 @@ class DevelopmentProtocolTests(unittest.TestCase):
         self.assertEqual(task["state"], "review_failed")
         self.assertIn("potential_secret_detected", task["review"]["failures"])
 
+    def seed_secret_fixture(self) -> str:
+        secret_name = "api" + "_key"
+        secret_value = "synthetic-" + ("x" * 16)
+        secret_line = f'{secret_name} = "{secret_value}"'
+        (self.source / "README.md").write_text(
+            f"# Fixture\n{secret_line}\nBefore.\n", encoding="utf-8"
+        )
+        git(["add", "README.md"], self.source)
+        git(
+            [
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-m",
+                "secret fixture baseline",
+            ],
+            self.source,
+        )
+        return secret_line
+
+    def test_secret_only_in_context_lines_does_not_fail_review(self) -> None:
+        secret_line = self.seed_secret_fixture()
+        context_task = self.start_and_prepare()
+        self.apply_fixture_change(
+            context_task, f"# Fixture\n{secret_line}\nAfter.\n"
+        )
+        self.controller.test(context_task, actor="test-runner")
+        context_review = self.controller.review(
+            context_task,
+            actor="reviewer-agent",
+            acceptance_evidence=["Only the safe fixture line changed."],
+        )
+        self.assertEqual(context_review["state"], "awaiting_publish_approval")
+
+    def test_secret_only_in_removed_lines_does_not_fail_review(self) -> None:
+        self.seed_secret_fixture()
+        removed_task = self.start_and_prepare()
+        self.apply_fixture_change(removed_task, "# Fixture\nRemoved fixture value.\n")
+        self.controller.test(removed_task, actor="test-runner")
+        removed_review = self.controller.review(
+            removed_task,
+            actor="reviewer-agent",
+            acceptance_evidence=["The fixture value was removed."],
+        )
+        self.assertEqual(removed_review["state"], "awaiting_publish_approval")
+
+    def test_untracked_secret_content_still_fails_review(self) -> None:
+        task_id = self.start_and_prepare()
+        secret_name = "api" + "_key"
+        secret_value = "synthetic-" + ("x" * 16)
+        path = self.root / "untracked-change-set.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "summary": "Add untracked evidence",
+                    "operations": [
+                        {
+                            "op": "write",
+                            "path": "evidence.txt",
+                            "content": f'{secret_name} = "{secret_value}"\n',
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.controller.apply_changes(
+            task_id, change_set_path=path, actor="coder-agent"
+        )
+        self.controller.test(task_id, actor="test-runner")
+        task = self.controller.review(
+            task_id,
+            actor="reviewer-agent",
+            acceptance_evidence=["Untracked content was inspected."],
+        )
+        self.assertEqual(task["state"], "review_failed")
+        self.assertIn("potential_secret_detected", task["review"]["failures"])
+
     def test_publish_approval_requires_exact_confirmation(self) -> None:
         task_id = self.start_and_prepare()
         self.apply_fixture_change(task_id)
