@@ -1,0 +1,248 @@
+name: publish-python-runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Build exact candidate once
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          docker build \
+            --file docker/python-runner.Dockerfile \
+            --iidfile runner-image.id \
+            --tag "$tag" \
+            .
+          test "$(docker image inspect --format='{{.Id}}' "$tag")" = "$(cat runner-image.id)"
+      - name: Qualify pytest and isolation compatibility
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          fixture="${RUNNER_TEMP}/runner-fixture"
+          output="${RUNNER_TEMP}/runner-output"
+          mkdir -p "$fixture/tests"
+          sudo install -d -o 65532 -g "$(id -g)" -m 0750 "$output"
+          cat > "$fixture/tests/test_runner.py" <<'PY'
+          import os
+          import pathlib
+          import socket
+
+          def test_runner_is_non_root():
+              assert os.getuid() != 0
+
+          def test_workspace_is_read_only():
+              try:
+                  pathlib.Path('/workspace/escape').write_text('bad')
+              except OSError:
+                  return
+              raise AssertionError('workspace is writable')
+
+          def test_network_is_unavailable():
+              try:
+                  socket.create_connection(('1.1.1.1', 53), 0.3)
+              except OSError:
+                  return
+              raise AssertionError('network is available')
+
+          def test_output_is_writable():
+              pathlib.Path(os.environ['AE_OUTPUT_DIR'], 'proof.txt').write_text('ok')
+          PY
+          docker run --rm \
+            --network none \
+            --read-only \
+            --user 65532:65532 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 128 \
+            --memory 1g \
+            --cpus 1.0 \
+            --ipc none \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=65532,gid=65532 \
+            --mount "type=bind,src=${fixture},dst=/workspace,readonly" \
+            --mount "type=bind,src=${output},dst=/output" \
+            --workdir /workspace \
+            --env HOME=/tmp \
+            --env TMPDIR=/tmp \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env PYTHONUNBUFFERED=1 \
+            --env AE_OUTPUT_DIR=/output \
+            "$tag" \
+            python -m pytest tests -v
+          test "$(cat "$output/proof.txt")" = "ok"
+      - name: Preserve exact qualified layer
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          docker save --output runner-image.tar "$tag"
+          sha256sum runner-image.tar > runner-image.tar.sha256
+          test "$(docker image inspect --format='{{.Id}}' "$tag")" = "$(cat runner-image.id)"
+          docker image inspect --format='{{.Os}}/{{.Architecture}}' "$tag" > runner-platform.txt
+          export QUALIFIED_TAG="$tag"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import tarfile
+          from pathlib import Path
+
+          with tarfile.open("runner-image.tar", "r") as archive:
+              stream = archive.extractfile("manifest.json")
+              if stream is None:
+                  raise SystemExit("Docker archive has no manifest.json")
+              entries = json.load(stream)
+          matching = [
+              item for item in entries
+              if os.environ["QUALIFIED_TAG"] in item.get("RepoTags", [])
+          ]
+          if len(matching) != 1:
+              raise SystemExit("qualified Docker archive entry is ambiguous")
+          config_name = matching[0].get("Config", "").rsplit("/", 1)[-1]
+          config_hex = config_name.removesuffix(".json")
+          if re.fullmatch(r"[0-9a-f]{64}", config_hex) is None:
+              raise SystemExit("qualified Docker config digest is invalid")
+          Path("runner-config.digest").write_text(
+              f"sha256:{config_hex}\n", encoding="ascii"
+          )
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualified-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            runner-image.tar
+            runner-image.tar.sha256
+            runner-image.id
+            runner-config.digest
+            runner-platform.txt
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: qualify
+    if: github.ref == 'refs/heads/main'
+    environment: python-runner-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: qualified-python-runner-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify exact qualified handoff
+        run: |
+          set -euo pipefail
+          sha256sum --check runner-image.tar.sha256
+          docker load --input runner-image.tar
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          test "$(docker image inspect --format='{{.Id}}' "$tag")" = "$(cat runner-image.id)"
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push run-bound tag and retain digest evidence
+        env:
+          REGISTRY_IMAGE: ghcr.io/suriyaboon/agentic-engineering-python-runner
+        run: |
+          set -euo pipefail
+          local_tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          run_tag="run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
+          remote_tag="${REGISTRY_IMAGE}:${run_tag}"
+          docker tag "$local_tag" "$remote_tag"
+          docker push "$remote_tag"
+          manifest_json="$(docker buildx imagetools inspect "$remote_tag" --format '{{json .Manifest}}')"
+          digest="$(python -c 'import json,sys; print(json.load(sys.stdin)["digest"])' <<< "$manifest_json")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          immutable_ref="${REGISTRY_IMAGE}@${digest}"
+          export IMMUTABLE_REF="$immutable_ref" REGISTRY_IMAGE TARGET_PLATFORM="$(cat runner-platform.txt)"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+          def inspect_raw(reference):
+              result = subprocess.run(
+                  ["docker", "buildx", "imagetools", "inspect", reference, "--raw"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              )
+              return json.loads(result.stdout)
+
+          document = inspect_raw(os.environ["IMMUTABLE_REF"])
+          config = document.get("config")
+          if isinstance(config, dict):
+              remote_config = config.get("digest", "")
+          else:
+              target_os, target_arch = os.environ["TARGET_PLATFORM"].split("/", 1)
+              candidates = [
+                  item for item in document.get("manifests", [])
+                  if item.get("platform", {}).get("os") == target_os
+                  and item.get("platform", {}).get("architecture") == target_arch
+              ]
+              if len(candidates) != 1:
+                  raise SystemExit("immutable OCI platform manifest is ambiguous")
+              child_digest = candidates[0].get("digest", "")
+              if DIGEST.fullmatch(child_digest) is None:
+                  raise SystemExit("immutable OCI child digest is invalid")
+              child = inspect_raw(f'{os.environ["REGISTRY_IMAGE"]}@{child_digest}')
+              child_config = child.get("config")
+              remote_config = (
+                  child_config.get("digest", "")
+                  if isinstance(child_config, dict)
+                  else ""
+              )
+          if DIGEST.fullmatch(remote_config) is None:
+              raise SystemExit("immutable registry config digest is invalid")
+          qualified_config = Path("runner-config.digest").read_text(
+              encoding="ascii"
+          ).strip()
+          if remote_config != qualified_config:
+              raise SystemExit("published image does not match qualified config digest")
+          Path("runner-remote-config.digest").write_text(
+              f"{remote_config}\n", encoding="ascii"
+          )
+          PY
+          test "$(cat runner-remote-config.digest)" = "$(cat runner-config.digest)"
+          export SOURCE_SHA="$GITHUB_SHA" IMAGE_ID="$(cat runner-image.id)" IMAGE_DIGEST="$digest" IMAGE_REFERENCE="$immutable_ref" QUALIFIED_CONFIG_DIGEST="$(cat runner-config.digest)" REMOTE_CONFIG_DIGEST="$(cat runner-remote-config.digest)" TARGET_PLATFORM="$(cat runner-platform.txt)"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          evidence = {
+              "schema_version": "ae.python_runner_release.v2",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "qualified_image_id": os.environ["IMAGE_ID"],
+              "qualified_config_digest": os.environ["QUALIFIED_CONFIG_DIGEST"],
+              "remote_config_digest": os.environ["REMOTE_CONFIG_DIGEST"],
+              "target_platform": os.environ["TARGET_PLATFORM"],
+              "published_digest": os.environ["IMAGE_DIGEST"],
+              "activation_reference": os.environ["IMAGE_REFERENCE"],
+              "runtime_network_required": False,
+              "policy_activated": False,
+          }
+          Path("python-runner-release.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+          cat python-runner-release.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: python-runner-digest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: python-runner-release.json
+          retention-days: 30
+          if-no-files-found: error
