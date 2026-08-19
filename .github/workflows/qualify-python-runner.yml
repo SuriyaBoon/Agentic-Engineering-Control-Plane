@@ -1,0 +1,166 @@
+name: qualify-python-runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Build exact candidate once
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          docker build \
+            --file docker/python-runner.Dockerfile \
+            --iidfile runner-image.id \
+            --tag "$tag" \
+            .
+          test "$(docker image inspect --format='{{.Id}}' "$tag")" = "$(cat runner-image.id)"
+      - name: Qualify pytest and isolation compatibility
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          fixture="${RUNNER_TEMP}/runner-fixture"
+          output="${RUNNER_TEMP}/runner-output"
+          mkdir -p "$fixture/tests"
+          sudo install -d -o 65532 -g "$(id -g)" -m 0750 "$output"
+          cat > "$fixture/tests/test_runner.py" <<'PY'
+          import os
+          import pathlib
+          import socket
+
+          def test_runner_is_non_root():
+              assert os.getuid() != 0
+
+          def test_workspace_is_read_only():
+              try:
+                  pathlib.Path('/workspace/escape').write_text('bad')
+              except OSError:
+                  return
+              raise AssertionError('workspace is writable')
+
+          def test_network_is_unavailable():
+              try:
+                  socket.create_connection(('1.1.1.1', 53), 0.3)
+              except OSError:
+                  return
+              raise AssertionError('network is available')
+
+          def test_output_is_writable():
+              pathlib.Path(os.environ['AE_OUTPUT_DIR'], 'proof.txt').write_text('ok')
+          PY
+          docker run --rm \
+            --network none \
+            --read-only \
+            --user 65532:65532 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --pids-limit 128 \
+            --memory 1g \
+            --cpus 1.0 \
+            --ipc none \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=65532,gid=65532 \
+            --mount "type=bind,src=${fixture},dst=/workspace,readonly" \
+            --mount "type=bind,src=${output},dst=/output" \
+            --workdir /workspace \
+            --env HOME=/tmp \
+            --env TMPDIR=/tmp \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env PYTHONUNBUFFERED=1 \
+            --env AE_OUTPUT_DIR=/output \
+            "$tag" \
+            python -m pytest tests -v
+          test "$(cat "$output/proof.txt")" = "ok"
+      - name: Preserve exact qualified layer
+        run: |
+          set -euo pipefail
+          tag="ae-python-runner-qualified:${GITHUB_SHA}"
+          docker save --output runner-image.tar "$tag"
+          sha256sum runner-image.tar > runner-image.tar.sha256
+          test "$(docker image inspect --format='{{.Id}}' "$tag")" = "$(cat runner-image.id)"
+          docker image inspect --format='{{.Os}}/{{.Architecture}}' "$tag" > runner-platform.txt
+          export QUALIFIED_TAG="$tag"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import tarfile
+          from pathlib import Path
+
+          with tarfile.open("runner-image.tar", "r") as archive:
+              stream = archive.extractfile("manifest.json")
+              if stream is None:
+                  raise SystemExit("Docker archive has no manifest.json")
+              entries = json.load(stream)
+          matching = [
+              item for item in entries
+              if os.environ["QUALIFIED_TAG"] in item.get("RepoTags", [])
+          ]
+          if len(matching) != 1:
+              raise SystemExit("qualified Docker archive entry is ambiguous")
+          config_name = matching[0].get("Config", "").rsplit("/", 1)[-1]
+          config_hex = config_name.removesuffix(".json")
+          if re.fullmatch(r"[0-9a-f]{64}", config_hex) is None:
+              raise SystemExit("qualified Docker config digest is invalid")
+          Path("runner-config.digest").write_text(
+              f"sha256:{config_hex}\n", encoding="ascii"
+          )
+          PY
+      - name: Write qualification evidence
+        run: |
+          set -euo pipefail
+          export SOURCE_SHA="$GITHUB_SHA"
+          export IMAGE_ID="$(cat runner-image.id)"
+          export CONFIG_DIGEST="$(cat runner-config.digest)"
+          export TARGET_PLATFORM="$(cat runner-platform.txt)"
+          export ARCHIVE_SHA256="$(awk '{print $1}' runner-image.tar.sha256)"
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          digest = re.compile(r"sha256:[0-9a-f]{64}")
+          hex_digest = re.compile(r"[0-9a-f]{64}")
+          if digest.fullmatch(os.environ["CONFIG_DIGEST"]) is None:
+              raise SystemExit("qualified config digest is invalid")
+          if hex_digest.fullmatch(os.environ["ARCHIVE_SHA256"]) is None:
+              raise SystemExit("qualified archive digest is invalid")
+          evidence = {
+              "schema_version": "ae.python_runner_qualification.v1",
+              "source_sha": os.environ["SOURCE_SHA"],
+              "qualified_image_id": os.environ["IMAGE_ID"],
+              "qualified_archive_sha256": os.environ["ARCHIVE_SHA256"],
+              "qualified_config_digest": os.environ["CONFIG_DIGEST"],
+              "target_platform": os.environ["TARGET_PLATFORM"],
+              "runtime_network_required": False,
+              "publication_performed": False,
+              "policy_activated": False,
+          }
+          Path("python-runner-qualification.json").write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          # Stable within one workflow run and source revision. A complete
+          # rerun may safely replace only this qualification artifact.
+          name: qualified-python-runner-${{ github.run_id }}-${{ github.sha }}
+          path: |
+            runner-image.tar
+            runner-image.tar.sha256
+            runner-image.id
+            runner-config.digest
+            runner-platform.txt
+            python-runner-qualification.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
